@@ -38,6 +38,8 @@ import io.github.dsheirer.module.Module;
 import io.github.dsheirer.module.ProcessingChain;
 import io.github.dsheirer.module.decode.DecoderFactory;
 import io.github.dsheirer.module.decode.event.IDecodeEvent;
+import io.github.dsheirer.module.decode.p25.P25ControlChannelDiscoveryNotification;
+import io.github.dsheirer.module.decode.p25.phase1.DecodeConfigP25;
 import io.github.dsheirer.module.log.EventLogManager;
 import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.record.RecorderFactory;
@@ -48,6 +50,9 @@ import io.github.dsheirer.source.SourceEvent;
 import io.github.dsheirer.source.SourceException;
 import io.github.dsheirer.source.config.SourceConfigTuner;
 import io.github.dsheirer.source.config.SourceConfigTunerMultipleFrequency;
+import io.github.dsheirer.source.config.ControlChannelFrequencyUpdater;
+import io.github.dsheirer.source.config.SourceConfiguration;
+import io.github.dsheirer.source.tuner.channel.AddDiscoveredFrequenciesRequest;
 import io.github.dsheirer.source.tuner.channel.TunerChannelSource;
 import io.github.dsheirer.source.tuner.manager.TunerManager;
 import io.github.dsheirer.util.ThreadPool;
@@ -367,6 +372,53 @@ public class ChannelProcessingManager implements Listener<ChannelEvent>
     }
 
     /**
+     * Adds current-site control channels discovered by a P25 decoder to the live rotation list and playlist channel.
+     */
+    @Subscribe
+    public void addDiscoveredControlChannels(P25ControlChannelDiscoveryNotification notification)
+    {
+        Channel channel = notification.getChannel();
+        ProcessingChain processingChain = mProcessingChainsMap.get(channel);
+
+        if(processingChain != null)
+        {
+            processingChain.getEventBus().post(new AddDiscoveredFrequenciesRequest(notification.getFrequencies()));
+        }
+
+        Runnable update = () -> {
+            SourceConfiguration original = channel.getSourceConfiguration();
+            SourceConfigTunerMultipleFrequency merged =
+                ControlChannelFrequencyUpdater.merge(original, notification.getFrequencies());
+
+            if(!(original instanceof SourceConfigTunerMultipleFrequency multiple) ||
+                !multiple.getFrequencies().equals(merged.getFrequencies()))
+            {
+                channel.setSourceConfiguration(merged);
+                mLog.info("Added discovered P25 control channel frequencies to channel [{}]: {}",
+                    channel.getName(), merged.getFrequencies());
+                mChannelEventBroadcaster.broadcast(
+                    new ChannelEvent(channel, ChannelEvent.Event.NOTIFICATION_CONFIGURATION_CHANGE));
+            }
+        };
+
+        if(GraphicsEnvironment.isHeadless())
+        {
+            update.run();
+        }
+        else
+        {
+            try
+            {
+                Platform.runLater(update);
+            }
+            catch(IllegalStateException e)
+            {
+                update.run();
+            }
+        }
+    }
+
+    /**
      * Stops the specified channel
      * @param channel to stop
      */
@@ -396,7 +448,16 @@ public class ChannelProcessingManager implements Listener<ChannelEvent>
         {
             String threadName = "sdrtrunk channel [" + channel.getChannelID() + "/" +
                     channel.getDecodeConfiguration().getDecoderType().getShortDisplayString() + "]";
-            source = mTunerManager.getSource(channel.getSourceConfiguration(),
+            SourceConfiguration sourceConfiguration = channel.getSourceConfiguration();
+
+            //Use a live multi-frequency source from startup so newly learned frequencies can be added without restart.
+            if(channel.isStandardChannel() && channel.getDecodeConfiguration() instanceof DecodeConfigP25 p25 &&
+                p25.getLearnControlChannels() && !(sourceConfiguration instanceof SourceConfigTunerMultipleFrequency))
+            {
+                sourceConfiguration = ControlChannelFrequencyUpdater.merge(sourceConfiguration, List.of());
+            }
+
+            source = mTunerManager.getSource(sourceConfiguration,
                 channel.getDecodeConfiguration().getChannelSpecification(), threadName);
         }
         catch(SourceException se)

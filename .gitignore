@@ -5,6 +5,7 @@
 out/
 .directory
 .settings
+.DS_Store
 
 ## File-based project format:
 *.iws

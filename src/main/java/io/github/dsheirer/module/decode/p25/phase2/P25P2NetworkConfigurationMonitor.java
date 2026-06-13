@@ -38,7 +38,9 @@ import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.RfssSta
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.SNDCPDataChannelAnnouncement;
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.SecondaryControlChannelBroadcastExplicit;
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.SecondaryControlChannelBroadcastImplicit;
+import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.SynchronizationBroadcast;
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.SystemServiceBroadcast;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -61,6 +63,8 @@ public class P25P2NetworkConfigurationMonitor
     //Network Status Messages
     private NetworkStatusBroadcastImplicit mNetworkStatusBroadcastImplicit;
     private NetworkStatusBroadcastExplicit mNetworkStatusBroadcastExplicit;
+    private MacMessage mSynchronizationBroadcastMessage;
+    private SynchronizationBroadcast mSynchronizationBroadcast;
 
     //Current Site Status Messages
     private RfssStatusBroadcastImplicit mRFSSStatusBroadcastImplicit;
@@ -118,6 +122,13 @@ public class P25P2NetworkConfigurationMonitor
 
         switch((mac.getOpcode()))
         {
+            case PHASE1_70_SYNCHRONIZATION_BROADCAST:
+                if(mac instanceof SynchronizationBroadcast synchronizationBroadcast)
+                {
+                    mSynchronizationBroadcastMessage = message;
+                    mSynchronizationBroadcast = synchronizationBroadcast;
+                }
+                break;
             case PHASE1_73_IDENTIFIER_UPDATE_TDMA_ABBREVIATED:
                 if(mac instanceof FrequencyBandUpdateTDMAAbbreviated tdma)
                 {
@@ -221,12 +232,46 @@ public class P25P2NetworkConfigurationMonitor
         mFrequencyBandMap.clear();
         mNetworkStatusBroadcastImplicit = null;
         mNetworkStatusBroadcastExplicit = null;
+        mSynchronizationBroadcastMessage = null;
+        mSynchronizationBroadcast = null;
         mRFSSStatusBroadcastImplicit = null;
         mRFSSStatusBroadcastExplicit = null;
         mSecondaryControlChannels.clear();
         mSystemServiceBroadcast = null;
         mNeighborSitesAbbreviated.clear();
         mNeighborSitesExtended.clear();
+    }
+
+    /**
+     * Current-site primary and secondary control channel downlink frequencies.
+     */
+    public Set<Long> getCurrentSiteControlFrequencies()
+    {
+        Set<Long> frequencies = new TreeSet<>();
+
+        if(mRFSSStatusBroadcastImplicit != null)
+        {
+            addFrequency(frequencies, mRFSSStatusBroadcastImplicit.getChannel());
+        }
+        else if(mRFSSStatusBroadcastExplicit != null)
+        {
+            addFrequency(frequencies, mRFSSStatusBroadcastExplicit.getChannel());
+        }
+
+        for(IChannelDescriptor channel: mSecondaryControlChannels.values())
+        {
+            addFrequency(frequencies, channel);
+        }
+
+        return frequencies;
+    }
+
+    private void addFrequency(Set<Long> frequencies, IChannelDescriptor channel)
+    {
+        if(channel != null && channel.getDownlinkFrequency() > 0)
+        {
+            frequencies.add(channel.getDownlinkFrequency());
+        }
     }
 
     public String getActivitySummary()
@@ -254,6 +299,8 @@ public class P25P2NetworkConfigurationMonitor
         {
             sb.append("  UNKNOWN");
         }
+
+        appendSynchronizationBroadcast(sb);
 
         sb.append("\n\nCurrent Site\n");
         if(mRFSSStatusBroadcastImplicit != null)
@@ -378,6 +425,38 @@ public class P25P2NetworkConfigurationMonitor
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Appends the last observed synchronization broadcast timing details for debugging over-the-air time.
+     */
+    private void appendSynchronizationBroadcast(StringBuilder sb)
+    {
+        sb.append("\n\nLast Sync Broadcast\n");
+
+        if(mSynchronizationBroadcast != null && mSynchronizationBroadcastMessage != null)
+        {
+            sb.append("  SYSTEM UTC:").append(Instant.ofEpochMilli(mSynchronizationBroadcast.getSystemTime()));
+            sb.append("  MESSAGE TIME:").append(Instant.ofEpochMilli(mSynchronizationBroadcastMessage.getTimestamp()));
+            sb.append("\n  OFFSET MS:")
+                    .append(mSynchronizationBroadcast.getSystemTime() - mSynchronizationBroadcastMessage.getTimestamp());
+            sb.append("  USABLE FOR CLOCK:")
+                    .append(!mSynchronizationBroadcast.isSystemTimeNotLockedToExternalReference() &&
+                            mSynchronizationBroadcast.isMicroslotsLockedToMinuteRollover());
+            sb.append("  SYSTEM LOCKED:")
+                    .append(!mSynchronizationBroadcast.isSystemTimeNotLockedToExternalReference());
+            sb.append("  MICROSLOTS LOCKED:")
+                    .append(mSynchronizationBroadcast.isMicroslotsLockedToMinuteRollover());
+            sb.append("\n  MICROSLOTS:").append(mSynchronizationBroadcast.getMicroSlots());
+            sb.append("  MS INTO MINUTE:").append(mSynchronizationBroadcast.getMilliSeconds());
+            sb.append("  LOCAL OFFSET VALID:").append(mSynchronizationBroadcast.isValidLocalTimeOffset());
+            sb.append("  LOCAL OFFSET:").append(mSynchronizationBroadcast.getTimeZone().getID());
+            sb.append("\n  RAW:").append(mSynchronizationBroadcastMessage.getMessage().toHexString());
+        }
+        else
+        {
+            sb.append("  NONE OBSERVED");
+        }
     }
 
     /**

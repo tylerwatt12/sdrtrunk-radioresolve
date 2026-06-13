@@ -19,6 +19,7 @@
 
 package io.github.dsheirer.audio;
 
+import com.google.common.eventbus.Subscribe;
 import io.github.dsheirer.alias.AliasList;
 import io.github.dsheirer.identifier.IdentifierUpdateListener;
 import io.github.dsheirer.identifier.IdentifierUpdateNotification;
@@ -43,6 +44,7 @@ public abstract class AbstractAudioModule extends Module implements IAudioSegmen
     private Broadcaster<IdentifierUpdateNotification> mIdentifierUpdateNotificationBroadcaster = new Broadcaster<>();
     private AliasList mAliasList;
     private AudioSegment mAudioSegment;
+    private CallTimingMetadata mCallTimingMetadata;
     private int mAudioSampleCount = 0;
     private boolean mRecordAudioOverride;
     private int mTimeslot;
@@ -112,6 +114,7 @@ public abstract class AbstractAudioModule extends Module implements IAudioSegmen
             if(mAudioSegment == null)
             {
                 mAudioSegment = new AudioSegment(mAliasList, getTimeslot());
+                mAudioSegment.setCallTimingMetadata(mCallTimingMetadata);
                 mAudioSegment.incrementConsumerCount();
                 mAudioSegment.addIdentifiers(mIdentifierCollection.getIdentifiers());
                 mIdentifierUpdateNotificationBroadcaster.addListener(mAudioSegment);
@@ -195,6 +198,23 @@ public abstract class AbstractAudioModule extends Module implements IAudioSegmen
     public MutableIdentifierCollection getIdentifierCollection()
     {
         return mIdentifierCollection;
+    }
+
+    /**
+     * Receives call timing metadata preloaded from a traffic channel start request.
+     */
+    @Subscribe
+    public void process(CallTimingPreloadData preloadData)
+    {
+        if(preloadData != null && preloadData.getData() != null)
+        {
+            mCallTimingMetadata = preloadData.getData();
+
+            if(mAudioSegment != null)
+            {
+                mAudioSegment.setCallTimingMetadata(mCallTimingMetadata);
+            }
+        }
     }
 
     /**

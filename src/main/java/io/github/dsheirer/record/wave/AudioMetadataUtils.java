@@ -23,6 +23,7 @@ import com.google.common.base.Joiner;
 import com.mpatric.mp3agic.ID3v24Tag;
 import io.github.dsheirer.alias.Alias;
 import io.github.dsheirer.alias.AliasList;
+import io.github.dsheirer.audio.CallTimingMetadata;
 import io.github.dsheirer.identifier.Form;
 import io.github.dsheirer.identifier.Identifier;
 import io.github.dsheirer.identifier.IdentifierClass;
@@ -77,13 +78,28 @@ public class AudioMetadataUtils
      */
     public static Map<AudioMetadata, String> getMetadataMap(IdentifierCollection identifierCollection, AliasList aliasList)
     {
+        return getMetadataMap(identifierCollection, aliasList, null);
+    }
+
+    /**
+     * Creates a metadata map from the audio metadata argument
+     * @param identifierCollection to create the metadata from
+     * @param aliasList to lookup identifier aliases
+     * @param callTimingMetadata production call timing metadata
+     * @return map of metadata tags to values
+     */
+    public static Map<AudioMetadata, String> getMetadataMap(IdentifierCollection identifierCollection, AliasList aliasList,
+                                                            CallTimingMetadata callTimingMetadata)
+    {
         Map<AudioMetadata, String> audioMetadata = new EnumMap<>(AudioMetadata.class);
         StringBuilder comments = new StringBuilder();
         audioMetadata.put(AudioMetadata.COMPOSER, SystemProperties.getInstance().getApplicationName());
-        String dateCreated = SDF.format(new Date(System.currentTimeMillis()));
+        long callStartTimestamp = callTimingMetadata != null ? callTimingMetadata.getCallStartTimestamp() :
+            System.currentTimeMillis();
+        String dateCreated = SDF.format(new Date(callStartTimestamp));
         audioMetadata.put(AudioMetadata.DATE_CREATED, dateCreated);
         comments.append("Date:").append(dateCreated).append(COMMENT_SEPARATOR);
-        audioMetadata.put(AudioMetadata.YEAR, YEAR_SDF.format(new Date(System.currentTimeMillis())));
+        audioMetadata.put(AudioMetadata.YEAR, YEAR_SDF.format(new Date(callStartTimestamp)));
         audioMetadata.put(AudioMetadata.GENRE, GENRE_SCANNER_AUDIO);
 
         if(identifierCollection != null)
@@ -173,6 +189,17 @@ public class AudioMetadataUtils
 
         }
 
+        if(callTimingMetadata != null)
+        {
+            comments.append("call_start_ms:").append(callTimingMetadata.getCallStartTimestamp()).append(COMMENT_SEPARATOR);
+            comments.append("call_start_source:").append(callTimingMetadata.getCallStartSource()).append(COMMENT_SEPARATOR);
+            comments.append("p25_system_time_estimate_ms:")
+                .append(callTimingMetadata.getP25SystemTimeEstimateTimestamp() != null ?
+                    callTimingMetadata.getP25SystemTimeEstimateTimestamp() : "null").append(COMMENT_SEPARATOR);
+            comments.append("p25_system_time_quality:")
+                .append(callTimingMetadata.getP25SystemTimeQuality()).append(COMMENT_SEPARATOR);
+        }
+
         audioMetadata.put(AudioMetadata.COMMENTS, comments.toString());
 
         return audioMetadata;
@@ -206,6 +233,7 @@ public class AudioMetadataUtils
                     break;
                 case DATE_CREATED:
                     tag.setDate(entry.getValue());
+                    tag.setRecordingTime(entry.getValue());
                     break;
                 case GENRE:
                     tag.setGenreDescription(entry.getValue());

@@ -28,6 +28,7 @@ import io.github.dsheirer.module.decode.DecoderType;
 import io.github.dsheirer.module.decode.config.AuxDecodeConfiguration;
 import io.github.dsheirer.module.decode.config.DecodeConfiguration;
 import io.github.dsheirer.module.decode.p25.phase2.DecodeConfigP25Phase2;
+import io.github.dsheirer.module.decode.p25.phase1.DecodeConfigP25Phase1;
 import io.github.dsheirer.module.decode.p25.phase2.enumeration.ScrambleParameters;
 import io.github.dsheirer.module.log.EventLogType;
 import io.github.dsheirer.module.log.config.EventLogConfiguration;
@@ -36,6 +37,7 @@ import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.record.RecorderType;
 import io.github.dsheirer.record.config.RecordConfiguration;
 import io.github.dsheirer.source.config.SourceConfiguration;
+import io.github.dsheirer.source.config.ControlChannelFrequencyUpdater;
 import io.github.dsheirer.source.tuner.manager.TunerManager;
 import java.util.ArrayList;
 import java.util.List;
@@ -69,6 +71,7 @@ public class P25P2ConfigurationEditor extends ChannelConfigurationEditor
     private IntegerTextField mSystemTextField;
     private IntegerTextField mNacTextField;
     private ToggleSwitch mIgnoreDataCallsButton;
+    private ToggleSwitch mLearnControlChannelsButton;
     private Spinner<Integer> mTrafficChannelPoolSizeSpinner;
 
     /**
@@ -133,6 +136,15 @@ public class P25P2ConfigurationEditor extends ChannelConfigurationEditor
             GridPane.setHalignment(directionLabel, HPos.LEFT);
             GridPane.setConstraints(directionLabel, 3, row);
             gridPane.getChildren().add(directionLabel);
+
+            GridPane.setConstraints(getLearnControlChannelsButton(), 4, row);
+            gridPane.getChildren().add(getLearnControlChannelsButton());
+
+            Label learnControlChannelsLabel = new Label("Learn Announced Control Channels");
+            learnControlChannelsLabel.setTooltip(new Tooltip("Add current-site primary and secondary control channels " +
+                "discovered over the air to this playlist channel"));
+            GridPane.setConstraints(learnControlChannelsLabel, 5, row);
+            gridPane.getChildren().add(learnControlChannelsLabel);
 
             Label wacnLabel = new Label("WACN");
             GridPane.setHalignment(wacnLabel, HPos.RIGHT);
@@ -206,7 +218,10 @@ public class P25P2ConfigurationEditor extends ChannelConfigurationEditor
     {
         if(mSourceConfigurationEditor == null)
         {
-            mSourceConfigurationEditor = new FrequencyEditor(mTunerManager);
+            mSourceConfigurationEditor = new FrequencyEditor(mTunerManager,
+                DecodeConfigP25Phase1.CHANNEL_ROTATION_DELAY_MINIMUM_MS,
+                DecodeConfigP25Phase1.CHANNEL_ROTATION_DELAY_MAXIMUM_MS,
+                DecodeConfigP25Phase1.CHANNEL_ROTATION_DELAY_DEFAULT_MS);
 
             //Add a listener so that we can push change notifications up to this editor
             mSourceConfigurationEditor.modifiedProperty()
@@ -243,6 +258,19 @@ public class P25P2ConfigurationEditor extends ChannelConfigurationEditor
         }
 
         return mIgnoreDataCallsButton;
+    }
+
+    private ToggleSwitch getLearnControlChannelsButton()
+    {
+        if(mLearnControlChannelsButton == null)
+        {
+            mLearnControlChannelsButton = new ToggleSwitch();
+            mLearnControlChannelsButton.setDisable(true);
+            mLearnControlChannelsButton.selectedProperty()
+                .addListener((observable, oldValue, newValue) -> modifiedProperty().set(true));
+        }
+
+        return mLearnControlChannelsButton;
     }
 
     private Spinner<Integer> getTrafficChannelPoolSizeSpinner()
@@ -345,6 +373,8 @@ public class P25P2ConfigurationEditor extends ChannelConfigurationEditor
 
             getIgnoreDataCallsButton().setDisable(false);
             getIgnoreDataCallsButton().setSelected(decodeConfig.getIgnoreDataCalls());
+            getLearnControlChannelsButton().setDisable(false);
+            getLearnControlChannelsButton().setSelected(decodeConfig.getLearnControlChannels());
             getTrafficChannelPoolSizeSpinner().setDisable(false);
             getTrafficChannelPoolSizeSpinner().getValueFactory().setValue(decodeConfig.getTrafficChannelPoolSize());
         }
@@ -357,6 +387,8 @@ public class P25P2ConfigurationEditor extends ChannelConfigurationEditor
             getSystemTextField().setDisable(true);
             getNacTextField().setDisable(true);
             getIgnoreDataCallsButton().setDisable(true);
+            getLearnControlChannelsButton().setDisable(true);
+            getLearnControlChannelsButton().setSelected(false);
             getTrafficChannelPoolSizeSpinner().setDisable(true);
         }
     }
@@ -381,6 +413,7 @@ public class P25P2ConfigurationEditor extends ChannelConfigurationEditor
         int nac = getNacTextField().get();
         config.setScrambleParameters(new ScrambleParameters(wacn, system, nac));
         config.setIgnoreDataCalls(getIgnoreDataCallsButton().isSelected());
+        config.setLearnControlChannels(getLearnControlChannelsButton().isSelected());
         config.setTrafficChannelPoolSize(getTrafficChannelPoolSizeSpinner().getValue());
 
         getItem().setDecodeConfiguration(config);
@@ -445,6 +478,12 @@ public class P25P2ConfigurationEditor extends ChannelConfigurationEditor
     {
         getSourceConfigurationEditor().save();
         SourceConfiguration sourceConfiguration = getSourceConfigurationEditor().getSourceConfiguration();
+
+        if(getLearnControlChannelsButton().isSelected())
+        {
+            sourceConfiguration = ControlChannelFrequencyUpdater.merge(sourceConfiguration, List.of());
+        }
+
         getItem().setSourceConfiguration(sourceConfiguration);
     }
 }

@@ -47,7 +47,9 @@ import io.github.dsheirer.module.decode.event.DecodeEventType;
 import io.github.dsheirer.module.decode.event.PlottableDecodeEvent;
 import io.github.dsheirer.module.decode.p25.IServiceOptionsProvider;
 import io.github.dsheirer.module.decode.p25.P25DecodeEvent;
+import io.github.dsheirer.module.decode.p25.P25ControlChannelDiscoveryNotification;
 import io.github.dsheirer.module.decode.p25.P25TrafficChannelManager;
+import io.github.dsheirer.module.decode.p25.phase1.DecodeConfigP25;
 import io.github.dsheirer.module.decode.p25.identifier.channel.APCO25Channel;
 import io.github.dsheirer.module.decode.p25.phase1.message.IFrequencyBand;
 import io.github.dsheirer.module.decode.p25.phase1.message.P25P1Message;
@@ -102,6 +104,7 @@ import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.StatusQ
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.StatusUpdateAbbreviated;
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.StatusUpdateExtendedLCCH;
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.StatusUpdateExtendedVCH;
+import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.SynchronizationBroadcast;
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.TelephoneInterconnectAnswerRequest;
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.TelephoneInterconnectVoiceChannelGrantUpdateExplicit;
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.structure.TelephoneInterconnectVoiceChannelGrantUpdateImplicit;
@@ -131,6 +134,7 @@ import io.github.dsheirer.module.decode.p25.reference.VoiceServiceOptions;
 import io.github.dsheirer.protocol.Protocol;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -147,6 +151,7 @@ public class P25P2DecoderState extends TimeslotDecoderState implements Identifie
     private P25P2NetworkConfigurationMonitor mNetworkConfigurationMonitor = new P25P2NetworkConfigurationMonitor();
     private P25TrafficChannelManager mTrafficChannelManager;
     private int mEndPttOnFacchCounter = 0;
+    private Set<Long> mPublishedControlChannels = Collections.emptySet();
 
     /**
      * Constructs an APCO-25 decoder state instance for a traffic or control channel.
@@ -265,6 +270,26 @@ public class P25P2DecoderState extends TimeslotDecoderState implements Identifie
             else if(message instanceof MotorolaTalkerAliasComplete tac && tac.isValid())
             {
                 mTrafficChannelManager.getTalkerAliasManager().update(tac.getRadio(), tac.getAlias());
+            }
+
+            publishDiscoveredControlChannels();
+        }
+    }
+
+    /**
+     * Publishes current-site control channels when learning is enabled and the discovered set changes.
+     */
+    private void publishDiscoveredControlChannels()
+    {
+        if(mChannel.isStandardChannel() && mChannel.getDecodeConfiguration() instanceof DecodeConfigP25 config &&
+            config.getLearnControlChannels() && hasInterModuleEventBus())
+        {
+            Set<Long> frequencies = mNetworkConfigurationMonitor.getCurrentSiteControlFrequencies();
+
+            if(!frequencies.isEmpty() && !frequencies.equals(mPublishedControlChannels))
+            {
+                mPublishedControlChannels = Set.copyOf(frequencies);
+                getInterModuleEventBus().post(new P25ControlChannelDiscoveryNotification(mChannel, frequencies));
             }
         }
     }
@@ -430,7 +455,7 @@ public class P25P2DecoderState extends TimeslotDecoderState implements Identifie
                 processUnitRegistration(message, mac);
                 break;
             case PHASE1_70_SYNCHRONIZATION_BROADCAST:
-                //Ignore - channel timing information
+                processNetwork(message, mac);
                 break;
             case PHASE1_71_AUTHENTICATION_DEMAND:
             case PHASE1_72_AUTHENTICATION_FNE_RESPONSE_ABBREVIATED:
@@ -1342,6 +1367,13 @@ public class P25P2DecoderState extends TimeslotDecoderState implements Identifie
 
         mNetworkConfigurationMonitor.processMacMessage(message);
 
+        if(mac instanceof SynchronizationBroadcast synchronizationBroadcast)
+        {
+            mTrafficChannelManager.processP25SystemTime(synchronizationBroadcast.getSystemTime(), message.getTimestamp(),
+                !synchronizationBroadcast.isSystemTimeNotLockedToExternalReference(),
+                synchronizationBroadcast.isMicroslotsLockedToMinuteRollover());
+        }
+
         if(mac instanceof NetworkStatusBroadcastImplicit nsbi)
         {
             setCurrentChannel(nsbi.getChannel());
@@ -1855,6 +1887,7 @@ public class P25P2DecoderState extends TimeslotDecoderState implements Identifie
                 case REQUEST_RESET:
                     resetState();
                     mNetworkConfigurationMonitor.reset();
+                    mPublishedControlChannels = Collections.emptySet();
                     break;
                 case NOTIFICATION_SOURCE_FREQUENCY:
                     long frequency = event.getFrequency();

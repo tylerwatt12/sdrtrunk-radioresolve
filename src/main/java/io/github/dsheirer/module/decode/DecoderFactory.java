@@ -84,6 +84,7 @@ import io.github.dsheirer.module.decode.nbfm.NBFMDecoderState;
 import io.github.dsheirer.module.decode.p25.P25TrafficChannelManager;
 import io.github.dsheirer.module.decode.p25.audio.P25P1AudioModule;
 import io.github.dsheirer.module.decode.p25.audio.P25P2AudioModule;
+import io.github.dsheirer.module.decode.p25.phase1.DecodeConfigP25;
 import io.github.dsheirer.module.decode.p25.phase1.DecodeConfigP25Phase1;
 import io.github.dsheirer.module.decode.p25.phase1.P25P1DecoderC4FM;
 import io.github.dsheirer.module.decode.p25.phase1.P25P1DecoderLSM;
@@ -249,13 +250,21 @@ public class DecoderFactory
         modules.add(new P25P2AudioModule(userPreferences, P25P2Message.TIMESLOT_1, aliasList));
         modules.add(new P25P2AudioModule(userPreferences, P25P2Message.TIMESLOT_2, aliasList));
 
-        //Add a channel rotation monitor when we have multiple control channel frequencies specified
+        //Add a channel rotation monitor for configured multiple frequencies or learned control channels.
         if(channel.getSourceConfiguration() instanceof SourceConfigTunerMultipleFrequency sctmf &&
                 sctmf.hasMultipleFrequencies())
         {
             List<State> activeStates = new ArrayList<>();
             activeStates.add(State.CONTROL);
             modules.add(new ChannelRotationMonitor(activeStates, sctmf.getFrequencyRotationDelay(), userPreferences));
+        }
+        else if(channel.isStandardChannel() && channel.getDecodeConfiguration() instanceof DecodeConfigP25 p25 &&
+            p25.getLearnControlChannels())
+        {
+            List<State> activeStates = new ArrayList<>();
+            activeStates.add(State.CONTROL);
+            modules.add(new ChannelRotationMonitor(activeStates, DecodeConfigP25Phase1.CHANNEL_ROTATION_DELAY_DEFAULT_MS,
+                userPreferences));
         }
     }
 
@@ -304,13 +313,21 @@ public class DecoderFactory
 
         modules.add(new P25P1AudioModule(userPreferences, aliasList));
 
-        //Add a channel rotation monitor when we have multiple control channel frequencies specified
+        //Add a channel rotation monitor for configured multiple frequencies or learned control channels.
         if(channel.getSourceConfiguration() instanceof SourceConfigTunerMultipleFrequency sctmf &&
             sctmf.hasMultipleFrequencies())
         {
             List<State> activeStates = new ArrayList<>();
             activeStates.add(State.CONTROL);
             modules.add(new ChannelRotationMonitor(activeStates, sctmf.getFrequencyRotationDelay(), userPreferences));
+        }
+        else if(channel.isStandardChannel() && channel.getDecodeConfiguration() instanceof DecodeConfigP25 p25 &&
+            p25.getLearnControlChannels())
+        {
+            List<State> activeStates = new ArrayList<>();
+            activeStates.add(State.CONTROL);
+            modules.add(new ChannelRotationMonitor(activeStates, DecodeConfigP25Phase1.CHANNEL_ROTATION_DELAY_DEFAULT_MS,
+                userPreferences));
         }
     }
 
@@ -771,12 +788,16 @@ public class DecoderFactory
                     DecodeConfigP25Phase1 originalP25 = (DecodeConfigP25Phase1)config;
                     DecodeConfigP25Phase1 copyP25 = new DecodeConfigP25Phase1();
                     copyP25.setIgnoreDataCalls(originalP25.getIgnoreDataCalls());
+                    copyP25.setLearnControlChannels(originalP25.getLearnControlChannels());
                     copyP25.setModulation(originalP25.getModulation());
                     copyP25.setTrafficChannelPoolSize(originalP25.getTrafficChannelPoolSize());
                     return copyP25;
                 case P25_PHASE2:
                     DecodeConfigP25Phase2 originalP25P2 = (DecodeConfigP25Phase2)config;
                     DecodeConfigP25Phase2 copyP25P2 = new DecodeConfigP25Phase2();
+                    copyP25P2.setIgnoreDataCalls(originalP25P2.getIgnoreDataCalls());
+                    copyP25P2.setLearnControlChannels(originalP25P2.getLearnControlChannels());
+                    copyP25P2.setTrafficChannelPoolSize(originalP25P2.getTrafficChannelPoolSize());
 
                     if(originalP25P2.getScrambleParameters() != null)
                     {

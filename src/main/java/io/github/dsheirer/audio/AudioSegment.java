@@ -79,6 +79,7 @@ public class AudioSegment implements Listener<IdentifierUpdateNotification>
     private AtomicInteger mConsumerCount = new AtomicInteger();
     private AliasList mAliasList;
     private long mStartTimestamp = System.currentTimeMillis();
+    private CallTimingMetadata mCallTimingMetadata;
     private long mSampleCount = 0;
     private boolean mDisposing = false;
     private AudioSegment mLinkedAudioSegment;
@@ -111,6 +112,40 @@ public class AudioSegment implements Listener<IdentifierUpdateNotification>
     public long getStartTimestamp()
     {
         return mStartTimestamp;
+    }
+
+    /**
+     * Timestamp to use as the production call start for recording filenames and metadata.
+     */
+    public long getCallStartTimestamp()
+    {
+        if(mCallTimingMetadata != null)
+        {
+            return mCallTimingMetadata.getCallStartTimestamp();
+        }
+
+        return getStartTimestamp();
+    }
+
+    /**
+     * Production call timing metadata.
+     */
+    public CallTimingMetadata getCallTimingMetadata()
+    {
+        return mCallTimingMetadata;
+    }
+
+    /**
+     * Sets the production call timing metadata.  Receiver-local P25 control grant timing takes precedence over the
+     * first-audio-buffer fallback.
+     */
+    public void setCallTimingMetadata(CallTimingMetadata callTimingMetadata)
+    {
+        if(callTimingMetadata != null && (mCallTimingMetadata == null ||
+            (!mCallTimingMetadata.isReceiverP25ControlGrant() && callTimingMetadata.isReceiverP25ControlGrant())))
+        {
+            mCallTimingMetadata = callTimingMetadata;
+        }
     }
 
     /**
@@ -410,6 +445,7 @@ public class AudioSegment implements Listener<IdentifierUpdateNotification>
         if(mAudioBuffers.isEmpty())
         {
             mStartTimestamp = System.currentTimeMillis() - 20;
+            setCallTimingMetadata(CallTimingMetadata.receiverFirstAudioBuffer(mStartTimestamp));
         }
 
         mAudioBuffers.add(audioBuffer);

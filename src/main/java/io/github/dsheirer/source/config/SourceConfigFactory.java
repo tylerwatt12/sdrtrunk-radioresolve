@@ -16,6 +16,7 @@
 package io.github.dsheirer.source.config;
 
 import io.github.dsheirer.source.SourceType;
+import java.util.ArrayList;
 
 public class SourceConfigFactory
 {
@@ -79,7 +80,8 @@ public class SourceConfigFactory
                     SourceConfigTunerMultipleFrequency originalMulti = (SourceConfigTunerMultipleFrequency) config;
                     SourceConfigTunerMultipleFrequency copyMulti = new SourceConfigTunerMultipleFrequency();
                     copyMulti.setPreferredTuner(originalMulti.getPreferredTuner());
-                    copyMulti.setFrequencies(originalMulti.getFrequencies());
+                    copyMulti.setFrequencies(new ArrayList<>(originalMulti.getFrequencies()));
+                    copyMulti.setFrequencyRotationDelay(originalMulti.getFrequencyRotationDelay());
                     return copyMulti;
                 case NONE:
                 default:

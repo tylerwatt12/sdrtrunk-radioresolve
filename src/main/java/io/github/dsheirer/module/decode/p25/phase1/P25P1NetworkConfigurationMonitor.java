@@ -46,7 +46,9 @@ import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.RFS
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.SNDCPDataChannelAnnouncementExplicit;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.SecondaryControlChannelBroadcast;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.SecondaryControlChannelBroadcastExplicit;
+import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.SynchronizationBroadcast;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.SystemServiceBroadcast;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -71,6 +73,7 @@ public class P25P1NetworkConfigurationMonitor
     private NetworkStatusBroadcast mTSBKNetworkStatusBroadcast;
     private LCNetworkStatusBroadcast mLCNetworkStatusBroadcast;
     private LCNetworkStatusBroadcastExplicit mLCNetworkStatusBroadcastExplicit;
+    private SynchronizationBroadcast mSynchronizationBroadcast;
 
     //Current Site Status Messagese
     private RFSSStatusBroadcast mTSBKRFSSStatusBroadcast;
@@ -129,6 +132,12 @@ public class P25P1NetworkConfigurationMonitor
                 if(tsbk instanceof NetworkStatusBroadcast)
                 {
                     mTSBKNetworkStatusBroadcast = (NetworkStatusBroadcast)tsbk;
+                }
+                break;
+            case OSP_TDMA_SYNC_BROADCAST:
+                if(tsbk instanceof SynchronizationBroadcast synchronizationBroadcast)
+                {
+                    mSynchronizationBroadcast = synchronizationBroadcast;
                 }
                 break;
             case OSP_SYSTEM_SERVICE_BROADCAST:
@@ -315,6 +324,7 @@ public class P25P1NetworkConfigurationMonitor
         mTSBKNetworkStatusBroadcast = null;
         mLCNetworkStatusBroadcast = null;
         mLCNetworkStatusBroadcastExplicit = null;
+        mSynchronizationBroadcast = null;
         mTSBKRFSSStatusBroadcast = null;
         mLCRFSSStatusBroadcast = null;
         mLCRFSSStatusBroadcastExplicit = null;
@@ -326,6 +336,46 @@ public class P25P1NetworkConfigurationMonitor
         mLCNeighborSites.clear();
         mLCNeighborSitesExplicit.clear();
         mTSBKNeighborSites.clear();
+    }
+
+    /**
+     * Current-site primary and secondary control channel downlink frequencies.
+     */
+    public Set<Long> getCurrentSiteControlFrequencies()
+    {
+        Set<Long> frequencies = new TreeSet<>();
+
+        if(mTSBKRFSSStatusBroadcast != null)
+        {
+            addFrequency(frequencies, mTSBKRFSSStatusBroadcast.getChannel());
+        }
+        else if(mLCRFSSStatusBroadcast != null)
+        {
+            addFrequency(frequencies, mLCRFSSStatusBroadcast.getChannel());
+        }
+        else if(mLCRFSSStatusBroadcastExplicit != null)
+        {
+            addFrequency(frequencies, mLCRFSSStatusBroadcastExplicit.getChannel());
+        }
+        else if(mAMBTCRFSSStatusBroadcast != null)
+        {
+            addFrequency(frequencies, mAMBTCRFSSStatusBroadcast.getChannel());
+        }
+
+        for(IChannelDescriptor channel: mSecondaryControlChannels.values())
+        {
+            addFrequency(frequencies, channel);
+        }
+
+        return frequencies;
+    }
+
+    private void addFrequency(Set<Long> frequencies, IChannelDescriptor channel)
+    {
+        if(channel != null && channel.getDownlinkFrequency() > 0)
+        {
+            frequencies.add(channel.getDownlinkFrequency());
+        }
     }
 
     /**
@@ -382,6 +432,8 @@ public class P25P1NetworkConfigurationMonitor
         {
             sb.append("  UNKNOWN");
         }
+
+        appendSynchronizationBroadcast(sb);
 
         sb.append("\n\nCurrent Site\n");
 
@@ -564,6 +616,38 @@ public class P25P1NetworkConfigurationMonitor
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Appends the last observed TDMA synchronization broadcast timing details for debugging over-the-air time.
+     */
+    private void appendSynchronizationBroadcast(StringBuilder sb)
+    {
+        sb.append("\n\nLast Sync Broadcast\n");
+
+        if(mSynchronizationBroadcast != null)
+        {
+            sb.append("  SYSTEM UTC:").append(Instant.ofEpochMilli(mSynchronizationBroadcast.getSystemTime()));
+            sb.append("  MESSAGE TIME:").append(Instant.ofEpochMilli(mSynchronizationBroadcast.getTimestamp()));
+            sb.append("\n  OFFSET MS:")
+                    .append(mSynchronizationBroadcast.getSystemTime() - mSynchronizationBroadcast.getTimestamp());
+            sb.append("  USABLE FOR CLOCK:")
+                    .append(!mSynchronizationBroadcast.isSystemTimeNotLockedToExternalReference() &&
+                            mSynchronizationBroadcast.isMicroslotsLockedToMinuteRollover());
+            sb.append("  SYSTEM LOCKED:")
+                    .append(!mSynchronizationBroadcast.isSystemTimeNotLockedToExternalReference());
+            sb.append("  MICROSLOTS LOCKED:")
+                    .append(mSynchronizationBroadcast.isMicroslotsLockedToMinuteRollover());
+            sb.append("\n  MICROSLOTS:").append(mSynchronizationBroadcast.getMicroSlots());
+            sb.append("  MS INTO MINUTE:").append(mSynchronizationBroadcast.getMilliSeconds());
+            sb.append("  LOCAL OFFSET VALID:").append(mSynchronizationBroadcast.isValidLocalTimeOffset());
+            sb.append("  LOCAL OFFSET:").append(mSynchronizationBroadcast.getTimeZone().getID());
+            sb.append("\n  RAW:").append(mSynchronizationBroadcast.getMessage().toHexString());
+        }
+        else
+        {
+            sb.append("  NONE OBSERVED");
+        }
     }
 
     /**

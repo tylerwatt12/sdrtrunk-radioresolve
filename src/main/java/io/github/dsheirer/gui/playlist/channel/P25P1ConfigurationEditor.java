@@ -35,6 +35,7 @@ import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.record.RecorderType;
 import io.github.dsheirer.record.config.RecordConfiguration;
 import io.github.dsheirer.source.config.SourceConfiguration;
+import io.github.dsheirer.source.config.ControlChannelFrequencyUpdater;
 import io.github.dsheirer.source.tuner.manager.TunerManager;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,6 +71,7 @@ public class P25P1ConfigurationEditor extends ChannelConfigurationEditor
     private EventLogConfigurationEditor mEventLogConfigurationEditor;
     private RecordConfigurationEditor mRecordConfigurationEditor;
     private ToggleSwitch mIgnoreDataCallsButton;
+    private ToggleSwitch mLearnControlChannelsButton;
     private Spinner<Integer> mTrafficChannelPoolSizeSpinner;
     private SegmentedButton mModulationSegmentedButton;
     private ToggleButton mC4FMToggleButton;
@@ -148,6 +150,15 @@ public class P25P1ConfigurationEditor extends ChannelConfigurationEditor
             Label modulationHelpLabel = new Label("C4FM: repeaters and non-simulcast trunked systems.  LSM: simulcast trunked systems.");
             GridPane.setConstraints(modulationHelpLabel, 0, 1, 6, 1);
             gridPane.getChildren().add(modulationHelpLabel);
+
+            GridPane.setConstraints(getLearnControlChannelsButton(), 0, 2);
+            gridPane.getChildren().add(getLearnControlChannelsButton());
+
+            Label learnControlChannelsLabel = new Label("Learn Announced Control Channels");
+            learnControlChannelsLabel.setTooltip(new Tooltip("Add current-site primary and secondary control channels " +
+                "discovered over the air to this playlist channel"));
+            GridPane.setConstraints(learnControlChannelsLabel, 1, 2, 5, 1);
+            gridPane.getChildren().add(learnControlChannelsLabel);
 
             mDecoderPane.setContent(gridPane);
         }
@@ -283,6 +294,19 @@ public class P25P1ConfigurationEditor extends ChannelConfigurationEditor
         return mIgnoreDataCallsButton;
     }
 
+    private ToggleSwitch getLearnControlChannelsButton()
+    {
+        if(mLearnControlChannelsButton == null)
+        {
+            mLearnControlChannelsButton = new ToggleSwitch();
+            mLearnControlChannelsButton.setDisable(true);
+            mLearnControlChannelsButton.selectedProperty()
+                .addListener((observable, oldValue, newValue) -> modifiedProperty().set(true));
+        }
+
+        return mLearnControlChannelsButton;
+    }
+
     private Spinner<Integer> getTrafficChannelPoolSizeSpinner()
     {
         if(mTrafficChannelPoolSizeSpinner == null)
@@ -325,12 +349,14 @@ public class P25P1ConfigurationEditor extends ChannelConfigurationEditor
     protected void setDecoderConfiguration(DecodeConfiguration config)
     {
         getIgnoreDataCallsButton().setDisable(config == null);
+        getLearnControlChannelsButton().setDisable(config == null);
         getTrafficChannelPoolSizeSpinner().setDisable(config == null);
 
         if(config instanceof DecodeConfigP25Phase1)
         {
             DecodeConfigP25Phase1 decodeConfig = (DecodeConfigP25Phase1)config;
             getIgnoreDataCallsButton().setSelected(decodeConfig.getIgnoreDataCalls());
+            getLearnControlChannelsButton().setSelected(decodeConfig.getLearnControlChannels());
             getTrafficChannelPoolSizeSpinner().getValueFactory().setValue(decodeConfig.getTrafficChannelPoolSize());
             if(decodeConfig.getModulation() == Modulation.C4FM)
             {
@@ -346,6 +372,7 @@ public class P25P1ConfigurationEditor extends ChannelConfigurationEditor
         else
         {
             getIgnoreDataCallsButton().setSelected(false);
+            getLearnControlChannelsButton().setSelected(false);
             getTrafficChannelPoolSizeSpinner().getValueFactory().setValue(0);
         }
     }
@@ -365,6 +392,7 @@ public class P25P1ConfigurationEditor extends ChannelConfigurationEditor
         }
 
         config.setIgnoreDataCalls(getIgnoreDataCallsButton().isSelected());
+        config.setLearnControlChannels(getLearnControlChannelsButton().isSelected());
         config.setTrafficChannelPoolSize(getTrafficChannelPoolSizeSpinner().getValue());
         config.setModulation(getC4FMToggleButton().isSelected() ? Modulation.C4FM : Modulation.CQPSK);
         getItem().setDecodeConfiguration(config);
@@ -429,6 +457,12 @@ public class P25P1ConfigurationEditor extends ChannelConfigurationEditor
     {
         getSourceConfigurationEditor().save();
         SourceConfiguration sourceConfiguration = getSourceConfigurationEditor().getSourceConfiguration();
+
+        if(getLearnControlChannelsButton().isSelected())
+        {
+            sourceConfiguration = ControlChannelFrequencyUpdater.merge(sourceConfiguration, List.of());
+        }
+
         getItem().setSourceConfiguration(sourceConfiguration);
     }
 }

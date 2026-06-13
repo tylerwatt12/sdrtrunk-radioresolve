@@ -146,7 +146,7 @@ public class AudioRecordingManager implements Listener<AudioSegment>
             }
             else
             {
-                Path path = getAudioRecordingPath(audioSegment.getIdentifierCollection(), recordFormat);
+                Path path = getAudioRecordingPath(audioSegment, recordFormat);
 
                 try
                 {
@@ -177,9 +177,10 @@ public class AudioRecordingManager implements Listener<AudioSegment>
     /**
      * Provides a formatted audio recording filename to use as the final audio filename.
      */
-    private Path getAudioRecordingPath(IdentifierCollection identifierCollection, RecordFormat recordFormat)
+    private Path getAudioRecordingPath(AudioSegment audioSegment, RecordFormat recordFormat)
     {
         StringBuilder sb = new StringBuilder();
+        IdentifierCollection identifierCollection = audioSegment.getIdentifierCollection();
 
         if(identifierCollection != null)
         {
@@ -287,7 +288,7 @@ public class AudioRecordingManager implements Listener<AudioSegment>
         }
 
         StringBuilder sbFinal = new StringBuilder();
-        sbFinal.append(TimeStamp.getTimeStamp("_")).append("_");
+        sbFinal.append(TimeStamp.getTimeStamp(audioSegment.getCallStartTimestamp(), "_")).append("_");
 
         //Remove any illegal filename characters
         String cleaned = StringUtils.replaceIllegalCharacters(sb.toString());

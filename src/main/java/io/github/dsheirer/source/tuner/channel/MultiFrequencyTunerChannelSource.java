@@ -25,12 +25,14 @@ import io.github.dsheirer.sample.complex.ComplexSamples;
 import io.github.dsheirer.source.Source;
 import io.github.dsheirer.source.SourceEvent;
 import io.github.dsheirer.source.SourceException;
+import io.github.dsheirer.source.config.ControlChannelFrequencyUpdater;
 import io.github.dsheirer.source.heartbeat.Heartbeat;
 import io.github.dsheirer.source.tuner.channel.rotation.FrequencyLockChangeRequest;
 import io.github.dsheirer.source.tuner.manager.TunerManager;
 import io.github.dsheirer.util.ThreadPool;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
@@ -66,7 +68,7 @@ public class MultiFrequencyTunerChannelSource extends TunerChannelSource
         mTunerManager = tunerManager;
         mTunerChannelSource = tunerChannelSource;
         mTunerChannelSource.setSourceEventListener(mConsumerSourceEventAdapter);
-        mFrequencies = frequencies;
+        mFrequencies = new CopyOnWriteArrayList<>(frequencies);
         mChannelSpecification = channelSpecification;
         mPreferredTuner = preferredTuner;
     }
@@ -179,6 +181,22 @@ public class MultiFrequencyTunerChannelSource extends TunerChannelSource
         else if(request.isUnlockRequest() && mLockedFrequencies.contains(request.getFrequency()))
         {
             mLockedFrequencies.remove(request.getFrequency());
+        }
+    }
+
+    /**
+     * Adds newly discovered frequencies to the live rotation list.
+     */
+    @Subscribe
+    public void process(AddDiscoveredFrequenciesRequest request)
+    {
+        for(long frequency: request.getFrequencies())
+        {
+            if(frequency > 0 && mFrequencies.size() < ControlChannelFrequencyUpdater.MAX_FREQUENCIES &&
+                !mFrequencies.contains(frequency))
+            {
+                mFrequencies.add(frequency);
+            }
         }
     }
 

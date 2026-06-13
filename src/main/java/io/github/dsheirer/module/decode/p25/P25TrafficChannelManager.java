@@ -18,6 +18,8 @@
  */
 package io.github.dsheirer.module.decode.p25;
 
+import io.github.dsheirer.audio.CallTimingMetadata;
+import io.github.dsheirer.audio.CallTimingPreloadData;
 import io.github.dsheirer.channel.IChannelDescriptor;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.Channel.ChannelType;
@@ -70,6 +72,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Calendar;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.locks.ReentrantLock;
@@ -123,6 +127,7 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
     private ScrambleParameters mPhase2ScrambleParameters;
     private Listener<IMessage> mMessageListener;
     private boolean mIgnoreDataCalls;
+    private P25SystemTimeSample mP25SystemTimeSample;
     //Used only for data calls
     private DecodeEventDuplicateDetector mDuplicateDetector = new DecodeEventDuplicateDetector();
     private TalkerAliasManager mTalkerAliasManager = new TalkerAliasManager();
@@ -165,6 +170,16 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
     public void processFrequencyBand(IFrequencyBand frequencyBand)
     {
         mFrequencyBandMap.put(frequencyBand.getIdentifier(), frequencyBand);
+    }
+
+    /**
+     * Stores the latest P25 system time sample for producing an informational call-start system time estimate.
+     */
+    public void processP25SystemTime(long p25SystemTime, long observedReceiverTimestamp, boolean systemLocked,
+                                     boolean microslotsLocked)
+    {
+        mP25SystemTimeSample = new P25SystemTimeSample(p25SystemTime, observedReceiverTimestamp, systemLocked,
+            microslotsLocked);
     }
 
     /**
@@ -1176,6 +1191,8 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
 
             ChannelStartProcessingRequest startChannelRequest = new ChannelStartProcessingRequest(trafficChannel,
                     apco25Channel, identifierCollection, this);
+            startChannelRequest.addPreloadDataContent(new CallTimingPreloadData(
+                getCallTimingMetadata(timestamp)));
             startChannelRequest.addPreloadDataContent(new PatchGroupPreLoadDataContent(identifierCollection, timestamp));
             startChannelRequest.addPreloadDataContent(new P25FrequencyBandPreloadDataContent(mFrequencyBandMap.values()));
             getInterModuleEventBus().post(startChannelRequest);
@@ -1191,6 +1208,85 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
             {
                 mAvailablePhase2TrafficChannelQueue.add(trafficChannel);
             }
+        }
+    }
+
+    /**
+     * Creates production call timing metadata from the receiver-local control channel grant timestamp.
+     */
+    private CallTimingMetadata getCallTimingMetadata(long callStartTimestamp)
+    {
+        Long p25SystemTimeEstimate = null;
+        String quality = CallTimingMetadata.QUALITY_UNAVAILABLE;
+
+        if(mP25SystemTimeSample != null)
+        {
+            quality = mP25SystemTimeSample.getQuality();
+
+            if(!CallTimingMetadata.QUALITY_UNUSABLE.equals(quality))
+            {
+                p25SystemTimeEstimate = mP25SystemTimeSample.getSystemTimeEstimate(callStartTimestamp);
+            }
+        }
+
+        return CallTimingMetadata.receiverP25ControlGrant(callStartTimestamp, p25SystemTimeEstimate, quality);
+    }
+
+    /**
+     * Latest observed P25 system time sample.  This is used only to calculate an informational estimate and is never
+     * used as the receiver's canonical call timestamp.
+     */
+    private static class P25SystemTimeSample
+    {
+        private static final long ONE_DAY_MILLIS = 24L * 60L * 60L * 1000L;
+        private static final long MINIMUM_SANE_SYSTEM_TIME = getMinimumSaneSystemTime();
+        private final long mP25SystemTime;
+        private final long mObservedReceiverTimestamp;
+        private final boolean mSystemLocked;
+        private final boolean mMicroslotsLocked;
+
+        private P25SystemTimeSample(long p25SystemTime, long observedReceiverTimestamp, boolean systemLocked,
+                                    boolean microslotsLocked)
+        {
+            mP25SystemTime = p25SystemTime;
+            mObservedReceiverTimestamp = observedReceiverTimestamp;
+            mSystemLocked = systemLocked;
+            mMicroslotsLocked = microslotsLocked;
+        }
+
+        private static long getMinimumSaneSystemTime()
+        {
+            Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+            calendar.clear();
+            calendar.set(Calendar.YEAR, 2020);
+            calendar.set(Calendar.MONTH, Calendar.JANUARY);
+            calendar.set(Calendar.DAY_OF_MONTH, 1);
+            return calendar.getTimeInMillis();
+        }
+
+        private String getQuality()
+        {
+            if(!isSane() || !mMicroslotsLocked)
+            {
+                return CallTimingMetadata.QUALITY_UNUSABLE;
+            }
+            else if(mSystemLocked)
+            {
+                return CallTimingMetadata.QUALITY_LOCKED;
+            }
+
+            return CallTimingMetadata.QUALITY_PRACTICAL;
+        }
+
+        private boolean isSane()
+        {
+            long now = System.currentTimeMillis();
+            return mP25SystemTime >= MINIMUM_SANE_SYSTEM_TIME && mP25SystemTime <= (now + ONE_DAY_MILLIS);
+        }
+
+        private long getSystemTimeEstimate(long callStartTimestamp)
+        {
+            return mP25SystemTime + (callStartTimestamp - mObservedReceiverTimestamp);
         }
     }
 

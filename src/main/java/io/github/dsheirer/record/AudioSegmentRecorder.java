@@ -104,7 +104,7 @@ public class AudioSegmentRecorder
 
             //Write ID3 metadata
             Map<AudioMetadata,String> metadataMap = AudioMetadataUtils.getMetadataMap(identifierCollection,
-                audioSegment.getAliasList());
+                audioSegment.getAliasList(), audioSegment.getCallTimingMetadata());
 
             byte[] id3Bytes = AudioMetadataUtils.getMP3ID3(metadataMap);
             outputStream.write(id3Bytes);
@@ -156,7 +156,7 @@ public class AudioSegmentRecorder
             }
 
             Map<AudioMetadata,String> metadataMap = AudioMetadataUtils.getMetadataMap(identifierCollection,
-                audioSegment.getAliasList());
+                audioSegment.getAliasList(), audioSegment.getCallTimingMetadata());
 
             ByteBuffer listChunk = AudioMetadataUtils.getLISTChunk(metadataMap);
             byte[] id3Bytes = AudioMetadataUtils.getMP3ID3(metadataMap);

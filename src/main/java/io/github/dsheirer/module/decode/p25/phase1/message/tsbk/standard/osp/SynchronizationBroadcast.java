@@ -49,7 +49,7 @@ public class SynchronizationBroadcast extends OSPMessage
     public static final int[] MONTH = {47, 48, 49, 50};
     public static final int[] DAY = {51, 52, 53, 54, 55};
     public static final int[] HOURS = {56, 57, 58, 59, 60};
-    public static final int[] MINUTES = {61, 62, 63, 65, 65, 66};
+    public static final int[] MINUTES = {61, 62, 63, 64, 65, 66};
     public static final int[] MICRO_SLOTS = {67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79};
 
     private static final DateFormat TIME_FORMATTER = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z");

@@ -55,6 +55,7 @@ import io.github.dsheirer.module.decode.ip.mototrbo.lrrp.LRRPPacket;
 import io.github.dsheirer.module.decode.ip.udp.UDPPacket;
 import io.github.dsheirer.module.decode.p25.IServiceOptionsProvider;
 import io.github.dsheirer.module.decode.p25.P25DecodeEvent;
+import io.github.dsheirer.module.decode.p25.P25ControlChannelDiscoveryNotification;
 import io.github.dsheirer.module.decode.p25.P25TrafficChannelManager;
 import io.github.dsheirer.module.decode.p25.identifier.channel.APCO25Channel;
 import io.github.dsheirer.module.decode.p25.phase1.message.IFrequencyBand;
@@ -160,6 +161,7 @@ import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.Roa
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.SNDCPDataChannelGrant;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.StatusQuery;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.StatusUpdate;
+import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.SynchronizationBroadcast;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.TelephoneInterconnectAnswerRequest;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.TelephoneInterconnectVoiceChannelGrant;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.TelephoneInterconnectVoiceChannelGrantUpdate;
@@ -173,6 +175,7 @@ import io.github.dsheirer.sample.Listener;
 import io.github.dsheirer.util.PacketUtil;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import org.jdesktop.swingx.mapviewer.GeoPosition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -192,6 +195,7 @@ public class P25P1DecoderState extends DecoderState implements IChannelEventList
     private final Listener<ChannelEvent> mChannelEventListener;
     private final P25TrafficChannelManager mTrafficChannelManager;
     private ServiceOptions mCurrentServiceOptions;
+    private Set<Long> mPublishedControlChannels = Collections.emptySet();
 
     /**
      * Constructs an APCO-25 decoder state with an optional traffic channel manager.
@@ -330,6 +334,26 @@ public class P25P1DecoderState extends DecoderState implements IChannelEventList
         else if(iMessage instanceof LinkControlWord lcw)
         {
             processLC(lcw, iMessage.getTimestamp(), false);
+        }
+
+        publishDiscoveredControlChannels();
+    }
+
+    /**
+     * Publishes current-site control channels when learning is enabled and the discovered set changes.
+     */
+    private void publishDiscoveredControlChannels()
+    {
+        if(mChannel.isStandardChannel() && mChannel.getDecodeConfiguration() instanceof DecodeConfigP25 config &&
+            config.getLearnControlChannels() && hasInterModuleEventBus())
+        {
+            Set<Long> frequencies = mNetworkConfigurationMonitor.getCurrentSiteControlFrequencies();
+
+            if(!frequencies.isEmpty() && !frequencies.equals(mPublishedControlChannels))
+            {
+                mPublishedControlChannels = Set.copyOf(frequencies);
+                getInterModuleEventBus().post(new P25ControlChannelDiscoveryNotification(mChannel, frequencies));
+            }
         }
     }
 
@@ -1225,6 +1249,14 @@ public class P25P1DecoderState extends DecoderState implements IChannelEventList
                 case OSP_ADJACENT_STATUS_BROADCAST_UNCOORDINATED_BAND_PLAN:
                 case OSP_RESERVED_3F:
                     mNetworkConfigurationMonitor.process(tsbk);
+
+                    if(tsbk instanceof SynchronizationBroadcast synchronizationBroadcast)
+                    {
+                        mTrafficChannelManager.processP25SystemTime(synchronizationBroadcast.getSystemTime(),
+                            synchronizationBroadcast.getTimestamp(),
+                            !synchronizationBroadcast.isSystemTimeNotLockedToExternalReference(),
+                            synchronizationBroadcast.isMicroslotsLockedToMinuteRollover());
+                    }
 
                     //Send the frequency bands to the traffic channel manager to use for traffic channel preload data
                     if(tsbk instanceof IFrequencyBand frequencyBand)
@@ -2150,6 +2182,7 @@ public class P25P1DecoderState extends DecoderState implements IChannelEventList
             case REQUEST_RESET:
                 resetState();
                 mNetworkConfigurationMonitor.reset();
+                mPublishedControlChannels = Collections.emptySet();
                 break;
             case NOTIFICATION_SOURCE_FREQUENCY:
                 long frequency = event.getFrequency();
