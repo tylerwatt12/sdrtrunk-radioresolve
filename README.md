@@ -1,5 +1,47 @@
-![Gradle Build](https://github.com/dsheirer/sdrtrunk/actions/workflows/gradle.yml/badge.svg)
-![Nightly Release](https://github.com/dsheirer/sdrtrunk/actions/workflows/nightly.yml/badge.svg)
+![RadioResolve Build](https://github.com/tylerwatt12/sdrtrunk-radioresolve/actions/workflows/radioresolve-release.yml/badge.svg)
+
+# sdrtrunk-radioresolve
+
+This is an unofficial RadioResolve fork of [DSHeirer/sdrtrunk](https://github.com/DSheirer/sdrtrunk).
+
+It is based on upstream sdrtrunk commit:
+
+```text
+a053315675e6764fe95c671139d796893c2b41a1
+2026-02-19
+#2364 Audio Playback supports 64-line alsa mixers as stereo output (#2374)
+```
+
+## What Is Different?
+
+This fork keeps the upstream sdrtrunk application behavior, with RadioResolve-focused additions for recording metadata and P25 control-channel frequency handling.
+
+Main changes:
+
+* Adds production MP3 timing metadata:
+  * `call_start_ms`
+  * `call_start_source`
+  * `p25_system_time_estimate_ms`
+  * `p25_system_time_quality`
+* Uses the receiver-local P25 control-channel grant timestamp for recording filenames and ID3 date fields when available.
+* Falls back to the first audio buffer timestamp when no grant timestamp is available.
+* Includes an optional P25 system-time estimate as informational metadata only.
+* Adds automatic P25 discovered control-channel frequency update support.
+* Documents generated MP3 metadata in [`docs/mp3-recording-metadata.md`](docs/mp3-recording-metadata.md).
+
+The P25 system-time estimate is not used as sdrtrunk's canonical clock, filename timestamp, or ID3 creation date. It is included only as informational metadata for downstream ingest/reconciliation logic.
+
+## Downloads
+
+RadioResolve builds are published from this fork's [Releases](https://github.com/tylerwatt12/sdrtrunk-radioresolve/releases) page.
+
+Upstream official sdrtrunk releases remain available from [DSHeirer/sdrtrunk releases](https://github.com/DSHeirer/sdrtrunk/releases).
+
+## Source and License
+
+sdrtrunk is licensed under the GNU General Public License v3.0. This modified version remains under GPLv3. See [`LICENSE`](LICENSE).
+
+For a concise list of fork changes, see [`RADIORESOLVE_CHANGES.md`](RADIORESOLVE_CHANGES.md).
 
 # MacOS Tahoe 26.1 Users - Attention:
 Changes to USB support in Tahoe version 26.x cause sdrtrunk to fail to launch.  Do the following to install the latest libusb and create a symbolic link and then use the nightly build which includes an updated usb4java native library for Tahoe with ARM processor.  There may still be issue(s) with MacOS accessing your USB SDR tuners.
@@ -25,7 +67,8 @@ A cross-platform java application for decoding, monitoring, recording and stream
 * [Help/Wiki Home Page](https://github.com/DSheirer/sdrtrunk/wiki)
 * [Getting Started](https://github.com/DSheirer/sdrtrunk/wiki/Getting-Started)
 * [User's Manual](https://github.com/DSheirer/sdrtrunk/wiki/User-Manual)
-* [Download](https://github.com/DSheirer/sdrtrunk/releases)
+* [RadioResolve Downloads](https://github.com/tylerwatt12/sdrtrunk-radioresolve/releases)
+* [Upstream Official Downloads](https://github.com/DSheirer/sdrtrunk/releases)
 * [Support](https://github.com/DSheirer/sdrtrunk/wiki/Support)
 
 ![sdrtrunk Application](https://github.com/DSheirer/sdrtrunk/wiki/images/sdrtrunk.png)
