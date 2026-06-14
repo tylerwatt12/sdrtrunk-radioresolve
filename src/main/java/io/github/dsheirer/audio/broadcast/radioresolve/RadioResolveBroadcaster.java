@@ -20,18 +20,39 @@
 package io.github.dsheirer.audio.broadcast.radioresolve;
 
 import com.google.common.net.HttpHeaders;
+import io.github.dsheirer.alias.Alias;
+import io.github.dsheirer.alias.AliasList;
+import io.github.dsheirer.alias.AliasModel;
 import io.github.dsheirer.audio.broadcast.AbstractAudioBroadcaster;
 import io.github.dsheirer.audio.broadcast.AudioRecording;
 import io.github.dsheirer.audio.broadcast.BroadcastEvent;
 import io.github.dsheirer.audio.broadcast.BroadcastState;
+import io.github.dsheirer.audio.convert.InputAudioFormat;
+import io.github.dsheirer.audio.convert.MP3Setting;
+import io.github.dsheirer.gui.playlist.radioreference.RadioReferenceDecoder;
+import io.github.dsheirer.identifier.Form;
+import io.github.dsheirer.identifier.Identifier;
+import io.github.dsheirer.identifier.IdentifierClass;
+import io.github.dsheirer.identifier.Role;
+import io.github.dsheirer.identifier.alias.TalkerAliasIdentifier;
+import io.github.dsheirer.identifier.configuration.ConfigurationLongIdentifier;
+import io.github.dsheirer.identifier.patch.PatchGroup;
+import io.github.dsheirer.identifier.patch.PatchGroupIdentifier;
+import io.github.dsheirer.identifier.radio.RadioIdentifier;
+import io.github.dsheirer.identifier.talkgroup.TalkgroupIdentifier;
 import io.github.dsheirer.util.ThreadPool;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.net.ConnectException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 import java.time.Duration;
 import java.util.Queue;
 import java.util.concurrent.CompletionException;
@@ -55,6 +76,7 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     public static final String RESULT_INVALID_API_KEY = "Invalid API Key";
     public static final String RESULT_NO_SERVER = "No Response";
     public static final String RESULT_ERROR = "Error";
+    private static final String MULTIPART_FORM_DATA = "multipart/form-data";
 
     private Queue<AudioRecording> mAudioRecordingQueue = new LinkedTransferQueue<>();
     private ScheduledFuture<?> mAudioRecordingProcessorFuture;
@@ -65,13 +87,16 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
         .build();
     private long mLastConnectionAttempt;
     private long mConnectionAttemptInterval = 5000;
+    private AliasModel mAliasModel;
 
     /**
      * Constructs an instance.
      */
-    public RadioResolveBroadcaster(RadioResolveConfiguration config)
+    public RadioResolveBroadcaster(RadioResolveConfiguration config, InputAudioFormat inputAudioFormat,
+                                   MP3Setting mp3Setting, AliasModel aliasModel)
     {
         super(config);
+        mAliasModel = aliasModel;
     }
 
     /**
@@ -204,7 +229,7 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
             {
                 try
                 {
-                    HttpRequest fileRequest = createUploadRequest(getBroadcastConfiguration(), audioRecording);
+                    HttpRequest fileRequest = createUploadRequest(getBroadcastConfiguration(), audioRecording, mAliasModel);
 
                     mHttpClient.sendAsync(fileRequest, HttpResponse.BodyHandlers.ofString())
                         .whenComplete((fileResponse, throwable) -> {
@@ -299,22 +324,215 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
      * Creates an upload request for tests and production uploads.
      */
     static HttpRequest createUploadRequest(RadioResolveConfiguration configuration, AudioRecording audioRecording)
-        throws FileNotFoundException
+        throws IOException
+    {
+        return createUploadRequest(configuration, audioRecording, null);
+    }
+
+    /**
+     * Creates an upload request for tests and production uploads.
+     */
+    static HttpRequest createUploadRequest(RadioResolveConfiguration configuration, AudioRecording audioRecording,
+                                           AliasModel aliasModel) throws IOException
     {
         Path path = audioRecording.getPath();
         String filename = path.getFileName() != null ? path.getFileName().toString() : path.toString();
+        byte[] audioBytes = Files.readAllBytes(path);
+        RadioResolveBuilder bodyBuilder = new RadioResolveBuilder();
+        bodyBuilder.addFile(audioBytes, filename)
+            .addPart("call_time_ms", audioRecording.getStartTime())
+            .addPart("duration_sec", formatSeconds(audioRecording.getRecordingLength()))
+            .addPart("target_id", getTo(audioRecording, aliasModel))
+            .addPart("source_id", getFrom(audioRecording))
+            .addPart("frequency_mhz", formatFrequencyMHz(getFrequency(audioRecording)))
+            .addPart("system_label", getConfigurationIdentifier(audioRecording, Form.SYSTEM))
+            .addPart("site_label", getConfigurationIdentifier(audioRecording, Form.SITE))
+            .addPart("logical_channel", getDecoderIdentifier(audioRecording, Form.CHANNEL_NAME))
+            .addPart("audio_protocol", getConfigurationIdentifier(audioRecording, Form.DECODER_TYPE))
+            .addPart("talkgroup_label", getTalkgroupLabel(audioRecording, aliasModel))
+            .addPart("talkgroup_group", getTalkgroupGroup(audioRecording, aliasModel))
+            .addPart("talker_alias", getTalkerAlias(audioRecording))
+            .addPart("patches", getPatches(audioRecording))
+            .addPart("node_name", getNodeName(configuration))
+            .addPart("node_timezone", getNodeTimezone(configuration))
+            .addPart("agent_version", AGENT_VERSION)
+            .addPart("original_filename", filename);
 
         return HttpRequest.newBuilder()
             .uri(createUri(configuration.getHost(), UPLOAD_PATH))
             .header(HttpHeaders.AUTHORIZATION, "Bearer " + configuration.getApiKey())
-            .header(HttpHeaders.CONTENT_TYPE, "audio/mpeg")
+            .header(HttpHeaders.CONTENT_TYPE, MULTIPART_FORM_DATA + "; boundary=" + bodyBuilder.getBoundary())
             .header(HttpHeaders.USER_AGENT, "sdrtrunk")
-            .header("X-Filename", filename)
-            .header("X-Agent-Version", AGENT_VERSION)
-            .header("X-Node-Hostname", getNodeName(configuration))
-            .header("X-Node-Timezone", getNodeTimezone(configuration))
-            .POST(HttpRequest.BodyPublishers.ofFile(path))
+            .POST(bodyBuilder.build())
             .build();
+    }
+
+    private static String formatSeconds(long milliseconds)
+    {
+        return String.format(Locale.US, "%.3f", milliseconds / 1000.0d);
+    }
+
+    private static String formatFrequencyMHz(Long frequency)
+    {
+        if(frequency != null && frequency > 0)
+        {
+            return String.format(Locale.US, "%.5f", frequency / 1E6d);
+        }
+
+        return null;
+    }
+
+    private static Long getFrequency(AudioRecording audioRecording)
+    {
+        Identifier identifier = audioRecording.getIdentifierCollection().getIdentifier(IdentifierClass.CONFIGURATION,
+            Form.CHANNEL_FREQUENCY, Role.ANY);
+
+        if(identifier instanceof ConfigurationLongIdentifier configurationLongIdentifier)
+        {
+            return configurationLongIdentifier.getValue();
+        }
+
+        return null;
+    }
+
+    private static String getFrom(AudioRecording audioRecording)
+    {
+        for(Identifier identifier: audioRecording.getIdentifierCollection().getIdentifiers(Role.FROM))
+        {
+            if(identifier instanceof RadioIdentifier radioIdentifier)
+            {
+                return radioIdentifier.getValue().toString();
+            }
+        }
+
+        return "0";
+    }
+
+    private static String getTalkerAlias(AudioRecording audioRecording)
+    {
+        for(Identifier identifier: audioRecording.getIdentifierCollection().getIdentifiers(Role.FROM))
+        {
+            if(identifier instanceof TalkerAliasIdentifier talkerAliasIdentifier && talkerAliasIdentifier.isValid())
+            {
+                return talkerAliasIdentifier.getValue();
+            }
+        }
+
+        return null;
+    }
+
+    private static String getTo(AudioRecording audioRecording, AliasModel aliasModel)
+    {
+        Identifier identifier = audioRecording.getIdentifierCollection().getToIdentifier();
+
+        if(identifier != null)
+        {
+            AliasList aliasList = getAliasList(audioRecording, aliasModel);
+
+            if(aliasList != null)
+            {
+                List<Alias> aliases = aliasList.getAliases(identifier);
+                Optional<Alias> streamAs = aliases.stream().filter(alias -> alias.getStreamTalkgroupAlias() != null).findFirst();
+
+                if(streamAs.isPresent())
+                {
+                    return String.valueOf(streamAs.get().getStreamTalkgroupAlias().getValue());
+                }
+            }
+
+            if(identifier instanceof PatchGroupIdentifier patchGroupIdentifier)
+            {
+                return patchGroupIdentifier.getValue().getPatchGroup().getValue().toString();
+            }
+            else if(identifier instanceof TalkgroupIdentifier talkgroupIdentifier)
+            {
+                return String.valueOf(RadioReferenceDecoder.convertToRadioReferenceTalkgroup(talkgroupIdentifier.getValue(),
+                    talkgroupIdentifier.getProtocol()));
+            }
+            else if(identifier instanceof RadioIdentifier radioIdentifier)
+            {
+                return radioIdentifier.getValue().toString();
+            }
+        }
+
+        return "0";
+    }
+
+    private static String getTalkgroupLabel(AudioRecording audioRecording, AliasModel aliasModel)
+    {
+        Alias alias = getFirstToAlias(audioRecording, aliasModel);
+        return alias != null ? alias.toString() : null;
+    }
+
+    private static String getTalkgroupGroup(AudioRecording audioRecording, AliasModel aliasModel)
+    {
+        Alias alias = getFirstToAlias(audioRecording, aliasModel);
+        return alias != null ? alias.getGroup() : null;
+    }
+
+    private static Alias getFirstToAlias(AudioRecording audioRecording, AliasModel aliasModel)
+    {
+        AliasList aliasList = getAliasList(audioRecording, aliasModel);
+        Identifier identifier = audioRecording.getIdentifierCollection().getToIdentifier();
+
+        if(aliasList != null && identifier != null)
+        {
+            List<Alias> aliases = aliasList.getAliases(identifier);
+
+            if(!aliases.isEmpty())
+            {
+                return aliases.get(0);
+            }
+        }
+
+        return null;
+    }
+
+    private static AliasList getAliasList(AudioRecording audioRecording, AliasModel aliasModel)
+    {
+        return aliasModel != null ? aliasModel.getAliasList(audioRecording.getIdentifierCollection()) : null;
+    }
+
+    private static String getPatches(AudioRecording audioRecording)
+    {
+        Identifier identifier = audioRecording.getIdentifierCollection().getToIdentifier();
+
+        if(identifier instanceof PatchGroupIdentifier patchGroupIdentifier)
+        {
+            PatchGroup patchGroup = patchGroupIdentifier.getValue();
+            StringBuilder sb = new StringBuilder();
+            sb.append("[");
+            sb.append(patchGroup.getPatchGroup().getValue());
+
+            for(TalkgroupIdentifier patched: patchGroup.getPatchedTalkgroupIdentifiers())
+            {
+                sb.append(",").append(patched.getValue());
+            }
+
+            for(RadioIdentifier patched: patchGroup.getPatchedRadioIdentifiers())
+            {
+                sb.append(",").append(patched.getValue());
+            }
+
+            sb.append("]");
+            return sb.toString();
+        }
+
+        return null;
+    }
+
+    private static String getConfigurationIdentifier(AudioRecording audioRecording, Form form)
+    {
+        Identifier identifier = audioRecording.getIdentifierCollection().getIdentifier(IdentifierClass.CONFIGURATION,
+            form, Role.ANY);
+        return identifier != null && identifier.isValid() ? identifier.toString() : null;
+    }
+
+    private static String getDecoderIdentifier(AudioRecording audioRecording, Form form)
+    {
+        Identifier identifier = audioRecording.getIdentifierCollection().getIdentifier(IdentifierClass.DECODER,
+            form, Role.BROADCAST);
+        return identifier != null && identifier.isValid() ? identifier.toString() : null;
     }
 
     /**

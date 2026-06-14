@@ -53,6 +53,8 @@ public class DiagnosticMonitor
     private static final Logger LOGGER = LoggerFactory.getLogger(DiagnosticMonitor.class);
     private final LoggingSuppressor LOG_SUPPRESSOR = new LoggingSuppressor(LOGGER);
     private static final String DIVIDER = "\n\n=========================================================================\n\n";
+    private static final String PROCESSING_DIAGNOSTIC_TRIGGER = "generate_processing_diagnostic_report.trigger";
+    private static final String THREAD_DUMP_TRIGGER = "generate_thread_dump.trigger";
     private UserPreferences mUserPreferences;
     private ChannelProcessingManager mChannelProcessingManager;
     private TunerManager mTunerManager;
@@ -91,6 +93,10 @@ public class DiagnosticMonitor
         if(mUserPreferences.getApplicationPreference().isAutomaticDiagnosticMonitoring())
         {
             LOGGER.info("Diagnostic monitoring enabled running every 30 seconds");
+            LOGGER.info("Diagnostic trigger monitor enabled. Create [" + PROCESSING_DIAGNOSTIC_TRIGGER + "] or [" +
+                    THREAD_DUMP_TRIGGER + "] in application root [" +
+                    mUserPreferences.getDirectoryPreference().getDirectoryApplicationRoot() +
+                    "] to generate diagnostic reports.");
             mBlockedThreadMonitorHandle = ThreadPool.SCHEDULED.scheduleAtFixedRate(mMonitor, 30, 30, TimeUnit.SECONDS);
         }
         else
@@ -165,6 +171,46 @@ public class DiagnosticMonitor
                         "threads: " + e.getLocalizedMessage());
                 //Set the flag so that we don't try to run again.
                 mUserAlertedToBlockedThreadCondition = true;
+            }
+        }
+    }
+
+    /**
+     * Checks for operator-created trigger files in the application root and generates the requested diagnostic report.
+     * This is intentionally simple so remote/headless receivers can be inspected without interacting with the GUI.
+     */
+    private void checkForDiagnosticTriggerFiles()
+    {
+        Path applicationRoot = mUserPreferences.getDirectoryPreference().getDirectoryApplicationRoot();
+        Path processingTrigger = applicationRoot.resolve(PROCESSING_DIAGNOSTIC_TRIGGER);
+        Path threadDumpTrigger = applicationRoot.resolve(THREAD_DUMP_TRIGGER);
+
+        if(Files.exists(processingTrigger))
+        {
+            try
+            {
+                Path report = generateProcessingDiagnosticReport("File-triggered processing diagnostic report: " +
+                        processingTrigger);
+                Files.deleteIfExists(processingTrigger);
+                LOGGER.warn("File-triggered processing diagnostic report generated: " + report);
+            }
+            catch(Throwable t)
+            {
+                LOGGER.error("Error generating file-triggered processing diagnostic report", t);
+            }
+        }
+
+        if(Files.exists(threadDumpTrigger))
+        {
+            try
+            {
+                Path report = generateThreadDumpReport();
+                Files.deleteIfExists(threadDumpTrigger);
+                LOGGER.warn("File-triggered thread dump report generated: " + report);
+            }
+            catch(Throwable t)
+            {
+                LOGGER.error("Error generating file-triggered thread dump report", t);
             }
         }
     }
@@ -315,6 +361,7 @@ public class DiagnosticMonitor
             try
             {
                 checkForBlockedThreads();
+                checkForDiagnosticTriggerFiles();
             }
             catch(Throwable t)
             {

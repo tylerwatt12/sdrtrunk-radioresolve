@@ -53,6 +53,7 @@ import io.github.dsheirer.source.config.SourceConfigTunerMultipleFrequency;
 import io.github.dsheirer.source.config.ControlChannelFrequencyUpdater;
 import io.github.dsheirer.source.config.SourceConfiguration;
 import io.github.dsheirer.source.tuner.channel.AddDiscoveredFrequenciesRequest;
+import io.github.dsheirer.source.tuner.channel.MultiFrequencyTunerChannelSource;
 import io.github.dsheirer.source.tuner.channel.TunerChannelSource;
 import io.github.dsheirer.source.tuner.manager.TunerManager;
 import io.github.dsheirer.util.ThreadPool;
@@ -993,6 +994,12 @@ public class ChannelProcessingManager implements Listener<ChannelEvent>
                     sb.append("Channel Source Class: " + source.getClass()).append("\n");
                     sb.append("\t\tTo String:").append(source).append("\n");
                     sb.append("\t\tHash:").append(Integer.toHexString(source.hashCode()).toUpperCase()).append("\n");
+
+                    if(source instanceof MultiFrequencyTunerChannelSource multiFrequencySource)
+                    {
+                        sb.append("\t\tMulti-Frequency Source: ")
+                                .append(multiFrequencySource.getDiagnosticInformation()).append("\n");
+                    }
                 }
                 else
                 {

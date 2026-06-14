@@ -76,7 +76,8 @@ public class BroadcastFactory
                     return new OpenMHzBroadcaster((OpenMHzConfiguration)configuration,
                         inputAudioFormat, mp3Setting, aliasModel);
                 case RADIORESOLVE:
-                    return new RadioResolveBroadcaster((RadioResolveConfiguration)configuration);
+                    return new RadioResolveBroadcaster((RadioResolveConfiguration)configuration,
+                        inputAudioFormat, mp3Setting, aliasModel);
                 case BROADCASTIFY:
                     return new IcecastTCPAudioBroadcaster((BroadcastifyFeedConfiguration) configuration,
                             inputAudioFormat, mp3Setting, aliasModel);
