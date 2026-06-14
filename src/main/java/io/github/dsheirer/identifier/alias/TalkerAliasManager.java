@@ -24,6 +24,7 @@ import io.github.dsheirer.identifier.IdentifierCollection;
 import io.github.dsheirer.identifier.MutableIdentifierCollection;
 import io.github.dsheirer.identifier.Role;
 import io.github.dsheirer.identifier.radio.RadioIdentifier;
+import io.github.dsheirer.module.decode.p25.telemetry.P25NetworkConfigurationSnapshot;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -142,5 +143,22 @@ public class TalkerAliasManager
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Structured snapshot of active talker aliases.
+     */
+    public synchronized List<P25NetworkConfigurationSnapshot.TalkerAlias> getTalkerAliasSnapshots()
+    {
+        List<Integer> radios = new ArrayList<>(mAliasMap.keySet());
+        Collections.sort(radios);
+        List<P25NetworkConfigurationSnapshot.TalkerAlias> snapshots = new ArrayList<>();
+
+        for(Integer radio: radios)
+        {
+            snapshots.add(new P25NetworkConfigurationSnapshot.TalkerAlias(radio, mAliasMap.get(radio).toString()));
+        }
+
+        return snapshots;
     }
 }

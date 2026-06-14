@@ -21,6 +21,7 @@ package io.github.dsheirer.gui.playlist.alias;
 
 import com.google.common.collect.Ordering;
 import io.github.dsheirer.alias.Alias;
+import io.github.dsheirer.alias.id.broadcast.BroadcastChannel;
 import io.github.dsheirer.gui.playlist.Editor;
 import io.github.dsheirer.icon.Icon;
 import io.github.dsheirer.playlist.PlaylistManager;
@@ -64,6 +65,9 @@ public class AliasBulkEditor extends Editor<List<Alias>>
     private Button mApplyMonitorButton;
     private ToggleSwitch mRecordToggleSwitch;
     private Button mApplyRecordButton;
+    private ComboBox<String> mStreamComboBox;
+    private Button mApplyStreamButton;
+    private Button mClearStreamButton;
 
     private BooleanProperty mChangeInProgressProperty;
     private ReadOnlyBooleanProperty mChangeInProgressROProperty;
@@ -154,6 +158,20 @@ public class AliasBulkEditor extends Editor<List<Alias>>
         GridPane.setConstraints(getApplyRecordButton(), 4, row);
         gridPane.getChildren().add(getApplyRecordButton());
 
+        Label streamLabel = new Label("Streaming");
+        GridPane.setHalignment(streamLabel, HPos.RIGHT);
+        GridPane.setConstraints(streamLabel, 0, ++row);
+        gridPane.getChildren().add(streamLabel);
+
+        GridPane.setConstraints(getStreamComboBox(), 1, row, 3, 1);
+        gridPane.getChildren().add(getStreamComboBox());
+
+        GridPane.setConstraints(getApplyStreamButton(), 4, row);
+        gridPane.getChildren().add(getApplyStreamButton());
+
+        GridPane.setConstraints(getClearStreamButton(), 5, row);
+        gridPane.getChildren().add(getClearStreamButton());
+
         getChildren().add(gridPane);
     }
 
@@ -168,6 +186,7 @@ public class AliasBulkEditor extends Editor<List<Alias>>
     {
         super.setItem(item);
         getEditingLabel().setText("Editing " + item.size() + " Aliases");
+        updateStreamConfigurations();
     }
 
     @Override
@@ -426,6 +445,83 @@ public class AliasBulkEditor extends Editor<List<Alias>>
         }
 
         return mApplyRecordButton;
+    }
+
+    private ComboBox<String> getStreamComboBox()
+    {
+        if(mStreamComboBox == null)
+        {
+            mStreamComboBox = new ComboBox<>();
+            mStreamComboBox.setMaxWidth(Double.MAX_VALUE);
+            updateStreamConfigurations();
+            mPlaylistManager.getBroadcastModel().getConfiguredBroadcasts()
+                .addListener((javafx.collections.ListChangeListener)change -> updateStreamConfigurations());
+            mStreamComboBox.getSelectionModel().selectedItemProperty()
+                .addListener((observable, oldValue, newValue) -> getApplyStreamButton().setDisable(newValue == null));
+        }
+
+        return mStreamComboBox;
+    }
+
+    private Button getApplyStreamButton()
+    {
+        if(mApplyStreamButton == null)
+        {
+            mApplyStreamButton = new Button("Apply");
+            mApplyStreamButton.setDisable(true);
+            mApplyStreamButton.setOnAction(event -> {
+                String selectedStream = getStreamComboBox().getSelectionModel().getSelectedItem();
+
+                if(selectedStream != null)
+                {
+                    startChange();
+
+                    for(Alias alias : getItem())
+                    {
+                        alias.removeAllBroadcastChannels();
+                        alias.addAliasID(new BroadcastChannel(selectedStream));
+                    }
+
+                    endChange();
+                }
+            });
+        }
+
+        return mApplyStreamButton;
+    }
+
+    private Button getClearStreamButton()
+    {
+        if(mClearStreamButton == null)
+        {
+            mClearStreamButton = new Button("Clear");
+            mClearStreamButton.setOnAction(event -> {
+                startChange();
+
+                for(Alias alias : getItem())
+                {
+                    alias.removeAllBroadcastChannels();
+                }
+
+                endChange();
+            });
+        }
+
+        return mClearStreamButton;
+    }
+
+    private void updateStreamConfigurations()
+    {
+        if(mStreamComboBox != null)
+        {
+            String selected = mStreamComboBox.getSelectionModel().getSelectedItem();
+            mStreamComboBox.getItems().setAll(mPlaylistManager.getBroadcastModel().getBroadcastConfigurationNames());
+
+            if(selected != null && mStreamComboBox.getItems().contains(selected))
+            {
+                mStreamComboBox.getSelectionModel().select(selected);
+            }
+        }
     }
 
     /**

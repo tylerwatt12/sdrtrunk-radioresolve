@@ -53,6 +53,8 @@ import io.github.dsheirer.module.decode.p25.phase1.DecodeConfigP25;
 import io.github.dsheirer.module.decode.p25.identifier.channel.APCO25Channel;
 import io.github.dsheirer.module.decode.p25.phase1.message.IFrequencyBand;
 import io.github.dsheirer.module.decode.p25.phase1.message.P25P1Message;
+import io.github.dsheirer.module.decode.p25.telemetry.P25NetworkConfigurationSnapshot;
+import io.github.dsheirer.module.decode.p25.telemetry.P25NetworkConfigurationSnapshotProvider;
 import io.github.dsheirer.module.decode.p25.phase1.message.lc.motorola.MotorolaTalkerAliasComplete;
 import io.github.dsheirer.module.decode.p25.phase2.message.EncryptionSynchronizationSequence;
 import io.github.dsheirer.module.decode.p25.phase2.message.mac.IP25ChannelGrantDetailProvider;
@@ -142,7 +144,8 @@ import org.slf4j.LoggerFactory;
  * Decoder state for an APCO-25 Phase II channel.  Maintains the call/control/data/idle state of the channel and
  * produces events by monitoring the decoded message stream.
  */
-public class P25P2DecoderState extends TimeslotDecoderState implements IdentifierUpdateListener
+public class P25P2DecoderState extends TimeslotDecoderState
+    implements IdentifierUpdateListener, P25NetworkConfigurationSnapshotProvider
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(P25P2DecoderState.class);
     private static final LoggingSuppressor LOGGING_SUPPRESSOR = new LoggingSuppressor(LOGGER);
@@ -1875,6 +1878,17 @@ public class P25P2DecoderState extends TimeslotDecoderState implements Identifie
         sb.append("\n");
         sb.append(mTrafficChannelManager.getTalkerAliasManager().getAliasSummary());
         return sb.toString();
+    }
+
+    @Override
+    public P25NetworkConfigurationSnapshot getP25NetworkConfigurationSnapshot()
+    {
+        P25NetworkConfigurationSnapshot snapshot = mNetworkConfigurationMonitor.getSnapshot();
+
+        return new P25NetworkConfigurationSnapshot(snapshot.decoder(), snapshot.network(), snapshot.currentSite(),
+            snapshot.channels(), snapshot.neighborSites(), snapshot.frequencyBands(),
+            mPatchGroupManager.getPatchGroupSnapshots(System.currentTimeMillis()),
+            mTrafficChannelManager.getTalkerAliasManager().getTalkerAliasSnapshots());
     }
 
     @Override

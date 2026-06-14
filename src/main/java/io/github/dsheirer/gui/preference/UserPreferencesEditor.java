@@ -21,6 +21,7 @@ package io.github.dsheirer.gui.preference;
 
 import io.github.dsheirer.eventbus.MyEventBus;
 import io.github.dsheirer.gui.playlist.ViewPlaylistRequest;
+import io.github.dsheirer.playlist.PlaylistManager;
 import io.github.dsheirer.preference.UserPreferences;
 import java.util.EnumMap;
 import java.util.Map;
@@ -55,6 +56,7 @@ public class UserPreferencesEditor extends BorderPane
 
     private Map<PreferenceEditorType,Node> mEditors = new EnumMap<>(PreferenceEditorType.class);
     private UserPreferences mUserPreferences;
+    private PlaylistManager mPlaylistManager;
     private MenuBar mMenuBar;
     private TreeView mEditorSelectionTreeView;
     private VBox mEditorAndButtonsBox;
@@ -66,9 +68,10 @@ public class UserPreferencesEditor extends BorderPane
      *
      * @param userPreferences to edit
      */
-    public UserPreferencesEditor(UserPreferences userPreferences)
+    public UserPreferencesEditor(UserPreferences userPreferences, PlaylistManager playlistManager)
     {
         mUserPreferences = userPreferences;
+        mPlaylistManager = playlistManager;
 
         setTop(getMenuBar());
 
@@ -199,6 +202,11 @@ public class UserPreferencesEditor extends BorderPane
             treeRoot.getChildren().add(storageItem);
             storageItem.setExpanded(true);
 
+            TreeItem<String> radioResolveItem = new TreeItem<>("RadioResolve");
+            radioResolveItem.getChildren().add(new TreeItem(PreferenceEditorType.RADIO_RESOLVE));
+            treeRoot.getChildren().add(radioResolveItem);
+            radioResolveItem.setExpanded(true);
+
             TreeItem<String> sourceItem = new TreeItem<>("Source");
             sourceItem.getChildren().add(new TreeItem(PreferenceEditorType.SOURCE_TUNERS));
             treeRoot.getChildren().add(sourceItem);
@@ -276,7 +284,7 @@ public class UserPreferencesEditor extends BorderPane
             }
             else
             {
-                editor = PreferenceEditorFactory.getEditor(type, getUserPreferences());
+                editor = PreferenceEditorFactory.getEditor(type, getUserPreferences(), mPlaylistManager);
                 mEditors.put(type, editor);
             }
         }

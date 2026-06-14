@@ -126,17 +126,17 @@ public class AudioPanel extends JPanel implements Listener<AudioEvent>
      */
     public static class AudioOutputMuteItem extends JMenuItem
     {
-        private final AudioOutput mAudioOutput;
+        private final AudioPlaybackManager mAudioPlaybackManager;
 
         /**
          * Constructs an instance
-         * @param audioOutput to mute/unmute
+         * @param audioPlaybackManager to mute/unmute
          */
-        public AudioOutputMuteItem(AudioOutput audioOutput)
+        public AudioOutputMuteItem(AudioPlaybackManager audioPlaybackManager)
         {
-            super(audioOutput.isMuted() ? "Unmute" : "Mute");
-            mAudioOutput = audioOutput;
-            addActionListener(e -> mAudioOutput.setMuted(!mAudioOutput.isMuted()));
+            super(audioPlaybackManager.isMuted() ? "Unmute" : "Mute");
+            mAudioPlaybackManager = audioPlaybackManager;
+            addActionListener(e -> mAudioPlaybackManager.setMuted(!mAudioPlaybackManager.isMuted()));
         }
     }
 
@@ -289,12 +289,13 @@ public class AudioPanel extends JPanel implements Listener<AudioEvent>
 
         public MuteButton()
         {
-            setIcon(UNMUTED_ICON);
+            mMuted = mAudioPlaybackManager.isMuted();
+            setIcon(mMuted ? MUTED_ICON : UNMUTED_ICON);
             setBorderPainted(false);
-            getAccessibleContext().setAccessibleName("Mute");
+            getAccessibleContext().setAccessibleName(mMuted ? "Unmute" : "Mute");
             addActionListener(e -> {
                 mMuted = !mMuted;
-                mAudioPlaybackManager.getAudioOutput().setMuted(mMuted);
+                mAudioPlaybackManager.setMuted(mMuted);
                 EventQueue.invokeLater(() -> {
                     setIcon(mMuted ? MUTED_ICON : UNMUTED_ICON);
                     getAccessibleContext().setAccessibleName(mMuted ? "Unmute" : "Mute");

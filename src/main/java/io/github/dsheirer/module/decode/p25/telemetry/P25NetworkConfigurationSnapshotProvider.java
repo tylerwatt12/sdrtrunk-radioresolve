@@ -1,6 +1,6 @@
 /*
  * *****************************************************************************
- * Copyright (C) 2014-2023 Dennis Sheirer
+ * Copyright (C) 2014-2026 Dennis Sheirer
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,26 +17,15 @@
  * ****************************************************************************
  */
 
-package io.github.dsheirer.preference;
+package io.github.dsheirer.module.decode.p25.telemetry;
 
 /**
- * Types of preferences
+ * Provider for structured P25 network configuration snapshots.
  */
-public enum PreferenceType
+public interface P25NetworkConfigurationSnapshotProvider
 {
-    APPLICATION,
-    CALIBRATION,
-    DECODE_EVENT,
-    DIRECTORY,
-    DUPLICATE_CALL_DETECTION,
-    JMBE_LIBRARY,
-    MP3,
-    MULTI_FREQUENCY,
-    PLAYLIST,
-    PLAYBACK,
-    RADIO_RESOLVE,
-    RADIO_REFERENCE,
-    RECORD,
-    TALKGROUP_FORMAT,
-    TUNER;
+    /**
+     * Current structured snapshot.
+     */
+    P25NetworkConfigurationSnapshot getP25NetworkConfigurationSnapshot();
 }

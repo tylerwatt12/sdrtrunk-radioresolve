@@ -32,6 +32,7 @@ public enum PreferenceEditorType
     AUDIO_RECORD("Record"),
     AUDIO_OUTPUT("Playback/Tones"),
     AUDIO_CALL_MANAGEMENT("Call Management"),
+    RADIO_RESOLVE("RadioResolve"),
     SOURCE_TUNERS("Tuners"),
     TALKGROUP_FORMAT("Talkgroup & Radio ID"),
     VECTOR_CALIBRATION("Vector Calibration"),

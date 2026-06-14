@@ -31,6 +31,7 @@ import io.github.dsheirer.preference.javafx.JavaFxPreferences;
 import io.github.dsheirer.preference.mp3.MP3Preference;
 import io.github.dsheirer.preference.playback.PlaybackPreference;
 import io.github.dsheirer.preference.playlist.PlaylistPreference;
+import io.github.dsheirer.preference.radioresolve.RadioResolvePreference;
 import io.github.dsheirer.preference.radioreference.RadioReferencePreference;
 import io.github.dsheirer.preference.record.RecordPreference;
 import io.github.dsheirer.preference.source.ChannelMultiFrequencyPreference;
@@ -65,6 +66,7 @@ public class UserPreferences implements Listener<PreferenceType>
     private MP3Preference mMP3Preference;
     private PlaybackPreference mPlaybackPreference;
     private PlaylistPreference mPlaylistPreference;
+    private RadioResolvePreference mRadioResolvePreference;
     private RadioReferencePreference mRadioReferencePreference;
     private RecordPreference mRecordPreference;
     private TalkgroupFormatPreference mTalkgroupFormatPreference;
@@ -165,6 +167,14 @@ public class UserPreferences implements Listener<PreferenceType>
     }
 
     /**
+     * RadioResolve node integration preferences
+     */
+    public RadioResolvePreference getRadioResolvePreference()
+    {
+        return mRadioResolvePreference;
+    }
+
+    /**
      * Recording preferences
      */
     public RecordPreference getRecordPreference()
@@ -227,6 +237,7 @@ public class UserPreferences implements Listener<PreferenceType>
         mMP3Preference = new MP3Preference(this::receive);
         mPlaybackPreference = new PlaybackPreference(this::receive);
         mPlaylistPreference = new PlaylistPreference(this::receive, mDirectoryPreference);
+        mRadioResolvePreference = new RadioResolvePreference(this::receive);
         mRadioReferencePreference = new RadioReferencePreference(this::receive);
         mRecordPreference = new RecordPreference(this::receive);
         mTalkgroupFormatPreference = new TalkgroupFormatPreference(this::receive);

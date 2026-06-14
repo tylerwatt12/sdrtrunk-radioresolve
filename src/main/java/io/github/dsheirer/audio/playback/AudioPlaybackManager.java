@@ -342,6 +342,8 @@ public class AudioPlaybackManager implements Listener<AudioSegment>, IAudioContr
                         throw new AudioException("Unsupported mixer channel configuration channel count: " + channelCount);
                 }
 
+                mAudioOutput.setMuted(mUserPreferences.getPlaybackPreference().isAudioOutputMuted());
+
                 //Note: audio output can use an alternate device if the requested device can't be used, so we assign
                 //the descriptor that was actually used by the audio output
                 mAudioPlaybackDevice = mAudioOutput.getAudioPlaybackDeviceDescriptor();
@@ -363,6 +365,32 @@ public class AudioPlaybackManager implements Listener<AudioSegment>, IAudioContr
     public AudioOutput getAudioOutput()
     {
         return mAudioOutput;
+    }
+
+    /**
+     * Sets and persists the audio output mute state.
+     */
+    public void setMuted(boolean muted)
+    {
+        mUserPreferences.getPlaybackPreference().setAudioOutputMuted(muted);
+
+        if(mAudioOutput != null)
+        {
+            mAudioOutput.setMuted(muted);
+        }
+    }
+
+    /**
+     * Current audio output mute state.
+     */
+    public boolean isMuted()
+    {
+        if(mAudioOutput != null)
+        {
+            return mAudioOutput.isMuted();
+        }
+
+        return mUserPreferences.getPlaybackPreference().isAudioOutputMuted();
     }
 
     /**

@@ -53,6 +53,8 @@ import io.github.dsheirer.module.decode.ip.ipv4.IPV4Packet;
 import io.github.dsheirer.module.decode.ip.mototrbo.ars.ARSPacket;
 import io.github.dsheirer.module.decode.ip.mototrbo.lrrp.LRRPPacket;
 import io.github.dsheirer.module.decode.ip.udp.UDPPacket;
+import io.github.dsheirer.module.decode.p25.telemetry.P25NetworkConfigurationSnapshot;
+import io.github.dsheirer.module.decode.p25.telemetry.P25NetworkConfigurationSnapshotProvider;
 import io.github.dsheirer.module.decode.p25.IServiceOptionsProvider;
 import io.github.dsheirer.module.decode.p25.P25DecodeEvent;
 import io.github.dsheirer.module.decode.p25.P25ControlChannelDiscoveryNotification;
@@ -184,7 +186,7 @@ import org.slf4j.LoggerFactory;
  * Decoder state for an APCO25 channel.  Maintains the call/data/idle state of the channel and produces events by
  * monitoring the decoded message stream.
  */
-public class P25P1DecoderState extends DecoderState implements IChannelEventListener
+public class P25P1DecoderState extends DecoderState implements IChannelEventListener, P25NetworkConfigurationSnapshotProvider
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(P25P1DecoderState.class);
     private static final LoggingSuppressor LOGGING_SUPPRESSOR = new LoggingSuppressor(LOGGER);
@@ -2172,6 +2174,17 @@ public class P25P1DecoderState extends DecoderState implements IChannelEventList
         sb.append("\n");
         sb.append(mTrafficChannelManager.getTalkerAliasManager().getAliasSummary());
         return sb.toString();
+    }
+
+    @Override
+    public P25NetworkConfigurationSnapshot getP25NetworkConfigurationSnapshot()
+    {
+        P25NetworkConfigurationSnapshot snapshot = mNetworkConfigurationMonitor.getSnapshot();
+
+        return new P25NetworkConfigurationSnapshot(snapshot.decoder(), snapshot.network(), snapshot.currentSite(),
+            snapshot.channels(), snapshot.neighborSites(), snapshot.frequencyBands(),
+            mPatchGroupManager.getPatchGroupSnapshots(System.currentTimeMillis()),
+            mTrafficChannelManager.getTalkerAliasManager().getTalkerAliasSnapshots());
     }
 
     @Override

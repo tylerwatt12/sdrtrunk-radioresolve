@@ -26,6 +26,7 @@ import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
 import io.github.dsheirer.audio.broadcast.broadcastify.BroadcastifyCallConfiguration;
 import io.github.dsheirer.audio.broadcast.rdioscanner.RdioScannerConfiguration;
 import io.github.dsheirer.audio.broadcast.openmhz.OpenMHzConfiguration;
+import io.github.dsheirer.audio.broadcast.radioresolve.RadioResolveConfiguration;
 import io.github.dsheirer.audio.broadcast.icecast.IcecastConfiguration;
 import io.github.dsheirer.audio.broadcast.shoutcast.v1.ShoutcastV1Configuration;
 import io.github.dsheirer.audio.broadcast.shoutcast.v2.ShoutcastV2Configuration;
@@ -50,6 +51,7 @@ import java.net.SocketAddress;
     @JsonSubTypes.Type(value = BroadcastifyCallConfiguration.class, name="broadcastifyCallConfiguration"),
     @JsonSubTypes.Type(value = RdioScannerConfiguration.class, name="RdioScannerConfiguration"),
     @JsonSubTypes.Type(value = OpenMHzConfiguration.class, name="OpenMHzConfiguration"),
+    @JsonSubTypes.Type(value = RadioResolveConfiguration.class, name="RadioResolveConfiguration"),
     @JsonSubTypes.Type(value = IcecastConfiguration.class, name="icecastConfiguration"),
     @JsonSubTypes.Type(value = ShoutcastV1Configuration.class, name="shoutcastV1Configuration"),
     @JsonSubTypes.Type(value = ShoutcastV2Configuration.class, name="shoutcastV2Configuration"),

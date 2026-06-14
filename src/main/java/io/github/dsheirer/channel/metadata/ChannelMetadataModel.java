@@ -20,6 +20,7 @@ package io.github.dsheirer.channel.metadata;
 
 import com.google.common.eventbus.Subscribe;
 import io.github.dsheirer.alias.Alias;
+import io.github.dsheirer.channel.state.State;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.eventbus.MyEventBus;
 import io.github.dsheirer.identifier.Identifier;
@@ -56,6 +57,7 @@ public class ChannelMetadataModel extends AbstractTableModel implements IChannel
     private List<ChannelMetadata> mChannelMetadata = new ArrayList();
     private Map<ChannelMetadata,Channel> mMetadataChannelMap = new HashMap();
     private Listener<ChannelAndMetadata> mChannelAddListener;
+    private int mControlChannelCount;
 
     public ChannelMetadataModel()
     {
@@ -155,9 +157,9 @@ public class ChannelMetadataModel extends AbstractTableModel implements IChannel
         EventQueue.invokeLater(() -> {
             for(ChannelMetadata channelMetadata: channelAndMetadata.getChannelMetadata())
             {
-                mChannelMetadata.add(channelMetadata);
+                int index = getAddIndex(channelMetadata);
+                mChannelMetadata.add(index, channelMetadata);
                 mMetadataChannelMap.put(channelMetadata, channelAndMetadata.getChannel());
-                int index = mChannelMetadata.indexOf(channelMetadata);
                 fireTableRowsInserted(index, index);
                 channelMetadata.setUpdateEventListener(ChannelMetadataModel.this);
             }
@@ -188,6 +190,12 @@ public class ChannelMetadataModel extends AbstractTableModel implements IChannel
         EventQueue.invokeLater(() -> {
             channelMetadata.removeUpdateEventListener();
             int index = mChannelMetadata.indexOf(channelMetadata);
+
+            if(isControl(channelMetadata) && mControlChannelCount > 0)
+            {
+                mControlChannelCount--;
+            }
+
             mChannelMetadata.remove(channelMetadata);
             mMetadataChannelMap.remove(channelMetadata);
 
@@ -258,7 +266,7 @@ public class ChannelMetadataModel extends AbstractTableModel implements IChannel
     @Override
     public Object getValueAt(int rowIndex, int columnIndex)
     {
-        if(rowIndex <= mChannelMetadata.size())
+        if(rowIndex < mChannelMetadata.size())
         {
             ChannelMetadata channelMetadata = mChannelMetadata.get(rowIndex);
 
@@ -316,44 +324,90 @@ public class ChannelMetadataModel extends AbstractTableModel implements IChannel
     @Override
     public void updated(ChannelMetadata channelMetadata, ChannelMetadataField channelMetadataField)
     {
-        final int rowIndex = mChannelMetadata.indexOf(channelMetadata);
+        //Execute on the swing thread to avoid threading issues and to resolve the current row after queued changes.
+        EventQueue.invokeLater(() -> processUpdate(channelMetadata, channelMetadataField));
+    }
 
-        if(rowIndex >= 0)
+    private int getAddIndex(ChannelMetadata channelMetadata)
+    {
+        if(isControl(channelMetadata))
         {
-            //Execute on the swing thread to avoid threading issues
-            EventQueue.invokeLater(new Runnable()
-            {
-                @Override
-                public void run()
-                {
-                    switch(channelMetadataField)
-                    {
-                        case CONFIGURATION_CHANNEL:
-                            fireTableCellUpdated(rowIndex, COLUMN_CONFIGURATION_CHANNEL);
-                            break;
-                        case CONFIGURATION_FREQUENCY:
-                            fireTableCellUpdated(rowIndex, COLUMN_CONFIGURATION_FREQUENCY);
-                            break;
-                        case DECODER_CHANNEL_NAME:
-                            fireTableCellUpdated(rowIndex, COLUMN_DECODER_LOGICAL_CHANNEL_NAME);
-                            break;
-                        case DECODER_TYPE:
-                            fireTableCellUpdated(rowIndex, COLUMN_DECODER_TYPE);
-                            break;
-                        case DECODER_STATE:
-                            fireTableCellUpdated(rowIndex, COLUMN_DECODER_STATE);
-                            break;
-                        case USER_FROM:
-                            fireTableCellUpdated(rowIndex, COLUMN_USER_FROM);
-                            fireTableCellUpdated(rowIndex, COLUMN_USER_FROM_ALIAS);
-                            break;
-                        case USER_TO:
-                            fireTableCellUpdated(rowIndex, COLUMN_USER_TO);
-                            fireTableCellUpdated(rowIndex, COLUMN_USER_TO_ALIAS);
-                            break;
-                    }
-                }
-            });
+            return mControlChannelCount++;
         }
+
+        return mChannelMetadata.size();
+    }
+
+    private void processUpdate(ChannelMetadata channelMetadata, ChannelMetadataField channelMetadataField)
+    {
+        int rowIndex = mChannelMetadata.indexOf(channelMetadata);
+
+        if(rowIndex < 0)
+        {
+            return;
+        }
+
+        if(channelMetadataField == ChannelMetadataField.DECODER_STATE && moveControlChannelIfNeeded(channelMetadata, rowIndex))
+        {
+            return;
+        }
+
+        switch(channelMetadataField)
+        {
+            case CONFIGURATION_CHANNEL:
+                fireTableCellUpdated(rowIndex, COLUMN_CONFIGURATION_CHANNEL);
+                break;
+            case CONFIGURATION_FREQUENCY:
+                fireTableCellUpdated(rowIndex, COLUMN_CONFIGURATION_FREQUENCY);
+                break;
+            case DECODER_CHANNEL_NAME:
+                fireTableCellUpdated(rowIndex, COLUMN_DECODER_LOGICAL_CHANNEL_NAME);
+                break;
+            case DECODER_TYPE:
+                fireTableCellUpdated(rowIndex, COLUMN_DECODER_TYPE);
+                break;
+            case DECODER_STATE:
+                fireTableCellUpdated(rowIndex, COLUMN_DECODER_STATE);
+                break;
+            case USER_FROM:
+                fireTableCellUpdated(rowIndex, COLUMN_USER_FROM);
+                fireTableCellUpdated(rowIndex, COLUMN_USER_FROM_ALIAS);
+                break;
+            case USER_TO:
+                fireTableCellUpdated(rowIndex, COLUMN_USER_TO);
+                fireTableCellUpdated(rowIndex, COLUMN_USER_TO_ALIAS);
+                break;
+        }
+    }
+
+    private boolean moveControlChannelIfNeeded(ChannelMetadata channelMetadata, int rowIndex)
+    {
+        boolean isControl = isControl(channelMetadata);
+
+        if(isControl && rowIndex >= mControlChannelCount)
+        {
+            mChannelMetadata.remove(rowIndex);
+            mChannelMetadata.add(mControlChannelCount, channelMetadata);
+            mControlChannelCount++;
+            fireTableDataChanged();
+            return true;
+        }
+        else if(!isControl && rowIndex < mControlChannelCount)
+        {
+            mChannelMetadata.remove(rowIndex);
+            mControlChannelCount--;
+            mChannelMetadata.add(mControlChannelCount, channelMetadata);
+            fireTableDataChanged();
+            return true;
+        }
+
+        return false;
+    }
+
+    private boolean isControl(ChannelMetadata channelMetadata)
+    {
+        return channelMetadata != null &&
+            channelMetadata.getChannelStateIdentifier() != null &&
+            channelMetadata.getChannelStateIdentifier().getValue() == State.CONTROL;
     }
 }

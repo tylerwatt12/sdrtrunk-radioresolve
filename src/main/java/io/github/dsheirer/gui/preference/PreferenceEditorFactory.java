@@ -26,8 +26,10 @@ import io.github.dsheirer.gui.preference.decoder.JmbeLibraryPreferenceEditor;
 import io.github.dsheirer.gui.preference.directory.DirectoryPreferenceEditor;
 import io.github.dsheirer.gui.preference.mp3.MP3PreferenceEditor;
 import io.github.dsheirer.gui.preference.playback.PlaybackPreferenceEditor;
+import io.github.dsheirer.gui.preference.radioresolve.RadioResolvePreferenceEditor;
 import io.github.dsheirer.gui.preference.record.RecordPreferenceEditor;
 import io.github.dsheirer.gui.preference.tuner.TunerPreferenceEditor;
+import io.github.dsheirer.playlist.PlaylistManager;
 import io.github.dsheirer.preference.UserPreferences;
 import javafx.scene.Node;
 
@@ -36,7 +38,8 @@ import javafx.scene.Node;
  */
 public class PreferenceEditorFactory
 {
-    public static Node getEditor(PreferenceEditorType preferenceEditorType, UserPreferences userPreferences)
+    public static Node getEditor(PreferenceEditorType preferenceEditorType, UserPreferences userPreferences,
+                                 PlaylistManager playlistManager)
     {
         switch(preferenceEditorType)
         {
@@ -56,6 +59,8 @@ public class PreferenceEditorFactory
                 return new DirectoryPreferenceEditor(userPreferences);
             case JMBE_LIBRARY:
                 return new JmbeLibraryPreferenceEditor(userPreferences);
+            case RADIO_RESOLVE:
+                return new RadioResolvePreferenceEditor(userPreferences, playlistManager);
             case SOURCE_TUNERS:
                 return new TunerPreferenceEditor(userPreferences);
             case TALKGROUP_FORMAT:

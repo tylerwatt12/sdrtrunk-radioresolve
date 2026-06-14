@@ -46,6 +46,7 @@ public class PlaybackPreference extends Preference
 
     private static final String PREFERENCE_KEY_AUDIO_DEVICE_NAME = "audio.playback.device.name";
     private static final String PREFERENCE_KEY_AUDIO_CHANNEL_COUNT = "audio.playback.channel.count";
+    private static final String PREFERENCE_KEY_AUDIO_OUTPUT_MUTED = "audio.playback.output.muted";
     public static final int TONE_LENGTH_SAMPLES = 160;
 
     private final static Logger mLog = LoggerFactory.getLogger(PlaybackPreference.class);
@@ -57,6 +58,7 @@ public class PlaybackPreference extends Preference
     private ToneFrequency mDropToneFrequency;
     private ToneVolume mDropToneVolume;
     private AudioPlaybackDeviceDescriptor mAudioPlaybackDeviceDescriptor;
+    private Boolean mAudioOutputMuted;
 
     /**
      * Constructs this preference with an update listener
@@ -257,6 +259,29 @@ public class PlaybackPreference extends Preference
     public float[] getAudioPlaybackTestTone()
     {
         return ToneUtil.getTone(ToneFrequency.F1200, ToneVolume.V10, TONE_LENGTH_SAMPLES * 4);
+    }
+
+    /**
+     * Indicates if the audio output should be muted.
+     */
+    public boolean isAudioOutputMuted()
+    {
+        if(mAudioOutputMuted == null)
+        {
+            mAudioOutputMuted = mPreferences.getBoolean(PREFERENCE_KEY_AUDIO_OUTPUT_MUTED, false);
+        }
+
+        return mAudioOutputMuted;
+    }
+
+    /**
+     * Sets the audio output muted preference.
+     */
+    public void setAudioOutputMuted(boolean muted)
+    {
+        mAudioOutputMuted = muted;
+        mPreferences.putBoolean(PREFERENCE_KEY_AUDIO_OUTPUT_MUTED, muted);
+        notifyPreferenceUpdated();
     }
 
     /**

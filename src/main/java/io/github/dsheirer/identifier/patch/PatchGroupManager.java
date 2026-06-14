@@ -24,8 +24,10 @@ import io.github.dsheirer.identifier.IdentifierClass;
 import io.github.dsheirer.identifier.Role;
 import io.github.dsheirer.identifier.radio.RadioIdentifier;
 import io.github.dsheirer.identifier.talkgroup.TalkgroupIdentifier;
+import io.github.dsheirer.module.decode.p25.telemetry.P25NetworkConfigurationSnapshot;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +76,41 @@ public class PatchGroupManager
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Structured snapshot of active patch groups.
+     */
+    public synchronized List<P25NetworkConfigurationSnapshot.PatchGroup> getPatchGroupSnapshots(long referenceTimestamp)
+    {
+        List<Integer> patchGroups = new ArrayList<>(mPatchGroupTrackerMap.keySet());
+        Collections.sort(patchGroups);
+        List<P25NetworkConfigurationSnapshot.PatchGroup> snapshots = new ArrayList<>();
+
+        for(Integer patchGroup: patchGroups)
+        {
+            PatchGroupTracker tracker = mPatchGroupTrackerMap.get(patchGroup);
+
+            if(tracker != null)
+            {
+                if(tracker.isStale(referenceTimestamp))
+                {
+                    mPatchGroupTrackerMap.remove(patchGroup);
+                }
+                else
+                {
+                    PatchGroupIdentifier identifier = tracker.getPatchGroupIdentifier(referenceTimestamp);
+                    PatchGroup value = identifier.getValue();
+                    snapshots.add(new P25NetworkConfigurationSnapshot.PatchGroup(
+                        value.getPatchGroup().getValue(),
+                        value.getVersion(),
+                        value.getPatchedTalkgroupIdentifiers().stream().map(TalkgroupIdentifier::getValue).sorted().toList(),
+                        value.getPatchedRadioIdentifiers().stream().map(RadioIdentifier::getValue).sorted().toList()));
+                }
+            }
+        }
+
+        return snapshots;
     }
 
     /**

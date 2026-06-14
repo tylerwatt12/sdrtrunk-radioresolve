@@ -48,6 +48,9 @@ import io.github.dsheirer.monitor.ResourceMonitor;
 import io.github.dsheirer.playlist.PlaylistManager;
 import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.properties.SystemProperties;
+import io.github.dsheirer.radioresolve.RadioResolveConfigurations;
+import io.github.dsheirer.radioresolve.RadioResolveNodeService;
+import io.github.dsheirer.radioresolve.RadioResolveTelemetryService;
 import io.github.dsheirer.record.AudioRecordingManager;
 import io.github.dsheirer.sample.Listener;
 import io.github.dsheirer.settings.SettingsManager;
@@ -139,6 +142,8 @@ public class SDRTrunk implements Listener<TunerEvent>
     private TunerManager mTunerManager;
     private ApplicationLog mApplicationLog;
     private ResourceMonitor mResourceMonitor;
+    private RadioResolveNodeService mRadioResolveNodeService;
+    private RadioResolveTelemetryService mRadioResolveTelemetryService;
     private JFXPanel mResourceStatusPanel;
 
     private String mTitle;
@@ -250,6 +255,13 @@ public class SDRTrunk implements Listener<TunerEvent>
         mTunerManager.getDiscoveredTunerModel().addListener(this);
 
         mPlaylistManager.init();
+
+        mRadioResolveNodeService = new RadioResolveNodeService(mUserPreferences.getRadioResolvePreference(),
+            () -> RadioResolveConfigurations.findEnabled(mPlaylistManager.getBroadcastModel()));
+        mRadioResolveNodeService.start();
+        mRadioResolveTelemetryService = new RadioResolveTelemetryService(mUserPreferences.getRadioResolvePreference(),
+            () -> RadioResolveConfigurations.findEnabled(mPlaylistManager.getBroadcastModel()), mPlaylistManager);
+        mRadioResolveTelemetryService.start();
 
         if(GraphicsEnvironment.isHeadless())
         {
@@ -638,6 +650,14 @@ public class SDRTrunk implements Listener<TunerEvent>
     private void processShutdown()
     {
         mLog.info("Application shutdown started ...");
+        if(mRadioResolveNodeService != null)
+        {
+            mRadioResolveNodeService.stop();
+        }
+        if(mRadioResolveTelemetryService != null)
+        {
+            mRadioResolveTelemetryService.stop();
+        }
         mDiagnosticMonitor.stop();
         mUserPreferences.getSwingPreference().setLocation(WINDOW_FRAME_IDENTIFIER, mMainGui.getLocation());
         mUserPreferences.getSwingPreference().setDimension(WINDOW_FRAME_IDENTIFIER, mMainGui.getSize());

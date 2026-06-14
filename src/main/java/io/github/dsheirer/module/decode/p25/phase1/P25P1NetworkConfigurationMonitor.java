@@ -48,8 +48,12 @@ import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.Sec
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.SecondaryControlChannelBroadcastExplicit;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.SynchronizationBroadcast;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.standard.osp.SystemServiceBroadcast;
+import io.github.dsheirer.module.decode.p25.telemetry.P25NetworkConfigurationSnapshot;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -376,6 +380,191 @@ public class P25P1NetworkConfigurationMonitor
         {
             frequencies.add(channel.getDownlinkFrequency());
         }
+    }
+
+    /**
+     * Structured network configuration snapshot for external telemetry integrations.
+     */
+    public P25NetworkConfigurationSnapshot getSnapshot()
+    {
+        P25NetworkConfigurationSnapshot.Network network = getNetworkSnapshot();
+        List<P25NetworkConfigurationSnapshot.Channel> channels = new ArrayList<>();
+        P25NetworkConfigurationSnapshot.CurrentSite currentSite = getCurrentSiteSnapshot(channels);
+
+        for(IChannelDescriptor secondaryControlChannel: mSecondaryControlChannels.values())
+        {
+            channels.add(getChannelSnapshot("secondary_control", secondaryControlChannel));
+        }
+
+        if(mSNDCPDataChannel != null)
+        {
+            channels.add(getChannelSnapshot("fdma_data", mSNDCPDataChannel.getChannel()));
+        }
+
+        if(!mTDMADataChannelMap.isEmpty())
+        {
+            mTDMADataChannelMap.entrySet().stream().sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> channels.add(getChannelSnapshot("tdma_data", entry.getKey())));
+        }
+
+        return new P25NetworkConfigurationSnapshot("P25_PHASE_1", network, currentSite, channels,
+            getNeighborSiteSnapshots(), getFrequencyBandSnapshots(), Collections.emptyList(), Collections.emptyList());
+    }
+
+    private P25NetworkConfigurationSnapshot.Network getNetworkSnapshot()
+    {
+        if(mTSBKNetworkStatusBroadcast != null)
+        {
+            return new P25NetworkConfigurationSnapshot.Network(intValue(mTSBKNetworkStatusBroadcast.getWacn()),
+                intValue(mTSBKNetworkStatusBroadcast.getSystem()), intValue(mTSBKNetworkStatusBroadcast.getNAC()),
+                intValue(mTSBKNetworkStatusBroadcast.getLocationRegistrationArea()));
+        }
+        else if(mAMBTCNetworkStatusBroadcast != null)
+        {
+            return new P25NetworkConfigurationSnapshot.Network(intValue(mAMBTCNetworkStatusBroadcast.getWacn()),
+                intValue(mAMBTCNetworkStatusBroadcast.getSystem()), intValue(mAMBTCNetworkStatusBroadcast.getNAC()), null);
+        }
+        else if(mLCNetworkStatusBroadcast != null)
+        {
+            return new P25NetworkConfigurationSnapshot.Network(intValue(mLCNetworkStatusBroadcast.getWACN()),
+                intValue(mLCNetworkStatusBroadcast.getSystem()), null, null);
+        }
+        else if(mLCNetworkStatusBroadcastExplicit != null)
+        {
+            return new P25NetworkConfigurationSnapshot.Network(intValue(mLCNetworkStatusBroadcastExplicit.getWACN()),
+                intValue(mLCNetworkStatusBroadcastExplicit.getSystem()), null, null);
+        }
+
+        return null;
+    }
+
+    private P25NetworkConfigurationSnapshot.CurrentSite getCurrentSiteSnapshot(
+        List<P25NetworkConfigurationSnapshot.Channel> channels)
+    {
+        if(mTSBKRFSSStatusBroadcast != null)
+        {
+            channels.add(getChannelSnapshot("primary_control", mTSBKRFSSStatusBroadcast.getChannel()));
+            return new P25NetworkConfigurationSnapshot.CurrentSite(intValue(mTSBKRFSSStatusBroadcast.getSystem()),
+                intValue(mTSBKRFSSStatusBroadcast.getNAC()), intValue(mTSBKRFSSStatusBroadcast.getRfss()),
+                intValue(mTSBKRFSSStatusBroadcast.getSite()), intValue(mTSBKRFSSStatusBroadcast.getLocationRegistrationArea()),
+                mTSBKRFSSStatusBroadcast.isActiveNetworkConnectionToRfssControllerSite());
+        }
+        else if(mLCRFSSStatusBroadcast != null)
+        {
+            channels.add(getChannelSnapshot("primary_control", mLCRFSSStatusBroadcast.getChannel()));
+            return new P25NetworkConfigurationSnapshot.CurrentSite(intValue(mLCRFSSStatusBroadcast.getSystem()), null,
+                intValue(mLCRFSSStatusBroadcast.getRfss()), intValue(mLCRFSSStatusBroadcast.getSite()),
+                intValue(mLCRFSSStatusBroadcast.getLocationRegistrationArea()), null);
+        }
+        else if(mLCRFSSStatusBroadcastExplicit != null)
+        {
+            channels.add(getChannelSnapshot("primary_control", mLCRFSSStatusBroadcastExplicit.getChannel()));
+            return new P25NetworkConfigurationSnapshot.CurrentSite(null, null,
+                intValue(mLCRFSSStatusBroadcastExplicit.getRfss()), intValue(mLCRFSSStatusBroadcastExplicit.getSite()),
+                intValue(mLCRFSSStatusBroadcastExplicit.getLocationRegistrationArea()), null);
+        }
+        else if(mAMBTCRFSSStatusBroadcast != null)
+        {
+            channels.add(getChannelSnapshot("primary_control", mAMBTCRFSSStatusBroadcast.getChannel()));
+            return new P25NetworkConfigurationSnapshot.CurrentSite(intValue(mAMBTCRFSSStatusBroadcast.getSystem()),
+                intValue(mAMBTCRFSSStatusBroadcast.getNAC()), intValue(mAMBTCRFSSStatusBroadcast.getRFSS()),
+                intValue(mAMBTCRFSSStatusBroadcast.getSite()), intValue(mAMBTCRFSSStatusBroadcast.getLRA()),
+                mAMBTCRFSSStatusBroadcast.isActiveNetworkConnectionToRfssControllerSite());
+        }
+
+        return null;
+    }
+
+    private List<P25NetworkConfigurationSnapshot.NeighborSite> getNeighborSiteSnapshots()
+    {
+        List<P25NetworkConfigurationSnapshot.NeighborSite> neighbors = new ArrayList<>();
+        Set<Integer> sites = new TreeSet<>();
+        sites.addAll(mAMBTCNeighborSites.keySet());
+        sites.addAll(mLCNeighborSites.keySet());
+        sites.addAll(mLCNeighborSitesExplicit.keySet());
+        sites.addAll(mTSBKNeighborSites.keySet());
+
+        for(Integer site: sites)
+        {
+            if(mAMBTCNeighborSites.containsKey(site))
+            {
+                AMBTCAdjacentStatusBroadcast ambtc = mAMBTCNeighborSites.get(site);
+                neighbors.add(new P25NetworkConfigurationSnapshot.NeighborSite(intValue(ambtc.getSystem()),
+                    intValue(ambtc.getNAC()), intValue(ambtc.getRfss()), intValue(ambtc.getSite()),
+                    intValue(ambtc.getLocationRegistrationArea()), channelName(ambtc.getChannel()),
+                    downlink(ambtc.getChannel()), uplink(ambtc.getChannel()), null));
+            }
+            if(mLCNeighborSites.containsKey(site))
+            {
+                LCAdjacentSiteStatusBroadcast lc = mLCNeighborSites.get(site);
+                neighbors.add(new P25NetworkConfigurationSnapshot.NeighborSite(intValue(lc.getSystem()), null,
+                    intValue(lc.getRfss()), intValue(lc.getSite()), intValue(lc.getLocationRegistrationArea()),
+                    channelName(lc.getChannel()), downlink(lc.getChannel()), uplink(lc.getChannel()), null));
+            }
+            if(mLCNeighborSitesExplicit.containsKey(site))
+            {
+                LCAdjacentSiteStatusBroadcastExplicit lce = mLCNeighborSitesExplicit.get(site);
+                neighbors.add(new P25NetworkConfigurationSnapshot.NeighborSite(null, null,
+                    intValue(lce.getRfss()), intValue(lce.getSite()), intValue(lce.getLocationRegistrationArea()),
+                    channelName(lce.getChannel()), downlink(lce.getChannel()), uplink(lce.getChannel()), null));
+            }
+            if(mTSBKNeighborSites.containsKey(site))
+            {
+                AdjacentStatusBroadcast asb = mTSBKNeighborSites.get(site);
+                neighbors.add(new P25NetworkConfigurationSnapshot.NeighborSite(intValue(asb.getSystem()),
+                    intValue(asb.getNAC()), intValue(asb.getRfss()), intValue(asb.getSite()),
+                    intValue(asb.getLocationRegistrationArea()), channelName(asb.getChannel()), downlink(asb.getChannel()),
+                    uplink(asb.getChannel()), String.valueOf(asb.getSiteFlags())));
+            }
+        }
+
+        return neighbors;
+    }
+
+    private List<P25NetworkConfigurationSnapshot.FrequencyBand> getFrequencyBandSnapshots()
+    {
+        return mFrequencyBandMap.entrySet().stream().sorted(Map.Entry.comparingByKey())
+            .map(entry -> {
+                IFrequencyBand band = entry.getValue();
+                return new P25NetworkConfigurationSnapshot.FrequencyBand(band.getIdentifier(), band.isTDMA(),
+                    band.getBaseFrequency(), band.getBandwidth(), band.getChannelSpacing(), band.getTransmitOffset(),
+                    band.getTimeslotCount());
+            }).toList();
+    }
+
+    private P25NetworkConfigurationSnapshot.Channel getChannelSnapshot(String role, IChannelDescriptor channel)
+    {
+        return new P25NetworkConfigurationSnapshot.Channel(role, channelName(channel), downlink(channel), uplink(channel),
+            channel != null ? channel.isTDMAChannel() : null, channel != null ? channel.getTimeslotCount() : null);
+    }
+
+    private String channelName(IChannelDescriptor channel)
+    {
+        return channel != null ? channel.toString() : null;
+    }
+
+    private Long downlink(IChannelDescriptor channel)
+    {
+        return channel != null ? channel.getDownlinkFrequency() : null;
+    }
+
+    private Long uplink(IChannelDescriptor channel)
+    {
+        return channel != null ? channel.getUplinkFrequency() : null;
+    }
+
+    private Integer intValue(Object value)
+    {
+        if(value instanceof Identifier identifier)
+        {
+            return intValue(identifier.getValue());
+        }
+        else if(value instanceof Number number)
+        {
+            return number.intValue();
+        }
+
+        return null;
     }
 
     /**
