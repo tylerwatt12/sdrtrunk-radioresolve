@@ -145,14 +145,14 @@ public class RadioResolveDoctor
             return Check.error("Connection Test", "API key is required");
         }
 
-        String result = RadioResolveBroadcaster.testConnection(configuration);
+        RadioResolveBroadcaster.TestResult result = RadioResolveBroadcaster.testConnectionDetailed(configuration);
 
-        if(RadioResolveBroadcaster.RESULT_OK.equals(result))
+        if(result.success())
         {
-            return Check.ok("Connection Test", result);
+            return Check.ok("Connection Test", result.displayMessage());
         }
 
-        return Check.error("Connection Test", result);
+        return Check.error("Connection Test", result.message());
     }
 
     private static Check checkClockOffset(RadioResolvePreference preference)

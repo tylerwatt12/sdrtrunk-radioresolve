@@ -20,6 +20,8 @@
 package io.github.dsheirer.audio.broadcast.radioresolve;
 
 import com.google.common.net.HttpHeaders;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.github.dsheirer.alias.Alias;
 import io.github.dsheirer.alias.AliasList;
 import io.github.dsheirer.alias.AliasModel;
@@ -90,10 +92,12 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     private ScheduledFuture<?> mAudioRecordingProcessorFuture;
     private HttpClient mHttpClient;
     private AtomicInteger mInFlightUploads = new AtomicInteger();
+    private AtomicInteger mConsecutiveUploadFailures = new AtomicInteger();
     private long mLastConnectionAttempt;
     private long mConnectionAttemptInterval = 5000;
     private AliasModel mAliasModel;
     private volatile boolean mRunning;
+    private volatile boolean mServerReachable;
 
     /**
      * Constructs an instance.
@@ -114,7 +118,8 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     {
         mRunning = true;
         setBroadcastState(BroadcastState.CONNECTING);
-        updateConnectionState(testConnection(getBroadcastConfiguration()), "connecting to");
+        mServerReachable = updateConnectionState(testConnectionDetailed(getBroadcastConfiguration()), "connecting to",
+            true);
         mLastConnectionAttempt = System.currentTimeMillis();
 
         if(mAudioRecordingProcessorFuture == null)
@@ -208,29 +213,39 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
         if(getBroadcastState() != BroadcastState.CONNECTED &&
             (System.currentTimeMillis() - mLastConnectionAttempt > mConnectionAttemptInterval))
         {
-            setBroadcastState(BroadcastState.CONNECTING);
-            updateConnectionState(testConnection(getBroadcastConfiguration()), "reconnecting to");
+            if(!hasRecentUploadFailure())
+            {
+                setBroadcastState(BroadcastState.CONNECTING);
+            }
+
+            mServerReachable = updateConnectionState(testConnectionDetailed(getBroadcastConfiguration()),
+                "reconnecting to", !hasRecentUploadFailure());
             mLastConnectionAttempt = System.currentTimeMillis();
         }
 
-        return getBroadcastState() == BroadcastState.CONNECTED;
+        return mServerReachable;
     }
 
     /**
      * Updates broadcaster state from a connection test result.
      */
-    private void updateConnectionState(String response, String action)
+    private boolean updateConnectionState(TestResult result, String action, boolean allowConnectedState)
     {
-        if(RESULT_OK.equals(response))
+        if(result.success())
         {
-            setBroadcastState(BroadcastState.CONNECTED);
+            if(allowConnectedState)
+            {
+                setBroadcastState(BroadcastState.CONNECTED);
+            }
+
+            return true;
         }
-        else if(RESULT_INVALID_API_KEY.equals(response))
+        else if(RESULT_INVALID_API_KEY.equals(result.message()))
         {
             setBroadcastState(BroadcastState.INVALID_CREDENTIALS);
             mLog.error("Error " + action + " RadioResolve server [invalid API key]");
         }
-        else if(RESULT_NO_SERVER.equals(response))
+        else if(RESULT_NO_SERVER.equals(result.message()))
         {
             setBroadcastState(BroadcastState.NO_SERVER);
             mLog.error("Error " + action + " RadioResolve server [server not found or not reachable]");
@@ -238,8 +253,10 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
         else
         {
             setBroadcastState(BroadcastState.ERROR);
-            mLog.error("Error " + action + " RadioResolve server [" + response + "]");
+            mLog.error("Error " + action + " RadioResolve server [" + result.message() + "]");
         }
+
+        return false;
     }
 
     /**
@@ -289,7 +306,7 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
                 catch(Exception e)
                 {
                     mLog.error("RadioResolve upload request failed [" + safeMessage(e) + "]");
-                    setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+                    recordUploadFailure(safeMessage(e));
                     incrementErrorAudioCount();
                     broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
                     retryOrRemove(pendingUpload, safeMessage(e));
@@ -309,7 +326,7 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     {
         if(throwable != null)
         {
-            setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+            recordUploadFailure("temporary upload failure");
             incrementErrorAudioCount();
             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
             retryOrRemove(pendingUpload, "temporary upload failure");
@@ -320,12 +337,14 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
         if(statusCode >= 200 && statusCode < 300)
         {
+            recordUploadSuccess();
             incrementStreamedAudioCount();
             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_STREAMED_COUNT_CHANGE));
             pendingUpload.getAudioRecording().removePendingReplay();
         }
         else if(statusCode == 401 || statusCode == 403)
         {
+            recordUploadFailure("invalid API key or access denied");
             setBroadcastState(BroadcastState.INVALID_CREDENTIALS);
             incrementErrorAudioCount();
             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
@@ -334,7 +353,7 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
         }
         else if(isRetryableStatus(statusCode))
         {
-            setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+            recordUploadFailure("HTTP " + statusCode);
             incrementErrorAudioCount();
             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
             mLog.error("RadioResolve upload failed [status " + statusCode + "]");
@@ -342,12 +361,38 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
         }
         else
         {
-            setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+            recordUploadFailure("HTTP " + statusCode);
             incrementErrorAudioCount();
             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
             mLog.error("RadioResolve upload failed [status " + statusCode + "]");
             pendingUpload.getAudioRecording().removePendingReplay();
         }
+    }
+
+    private void recordUploadSuccess()
+    {
+        RadioResolveConfiguration configuration = getBroadcastConfiguration();
+        configuration.setLastSuccessfulUploadEpochMilliseconds(System.currentTimeMillis());
+        configuration.setLastUploadFailureMessage(null);
+        mConsecutiveUploadFailures.set(0);
+        mServerReachable = true;
+        setBroadcastState(BroadcastState.CONNECTED);
+    }
+
+    private void recordUploadFailure(String message)
+    {
+        RadioResolveConfiguration configuration = getBroadcastConfiguration();
+        configuration.setLastFailedUploadEpochMilliseconds(System.currentTimeMillis());
+        configuration.setLastUploadFailureMessage(message);
+        mConsecutiveUploadFailures.incrementAndGet();
+        setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+    }
+
+    private boolean hasRecentUploadFailure()
+    {
+        RadioResolveConfiguration configuration = getBroadcastConfiguration();
+        return mConsecutiveUploadFailures.get() > 0 &&
+            configuration.getLastFailedUploadEpochMilliseconds() > configuration.getLastSuccessfulUploadEpochMilliseconds();
     }
 
     private boolean isRetryableStatus(int statusCode)
@@ -733,6 +778,15 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
      */
     public static String testConnection(RadioResolveConfiguration configuration)
     {
+        TestResult result = testConnectionDetailed(configuration);
+        return result.success() ? RESULT_OK : result.message();
+    }
+
+    /**
+     * Tests the connection and returns server-resolved node identity when available.
+     */
+    public static TestResult testConnectionDetailed(RadioResolveConfiguration configuration)
+    {
         HttpClient httpClient = createHttpClient(configuration);
 
         HttpRequest request = HttpRequest.newBuilder()
@@ -750,14 +804,14 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
             if(statusCode >= 200 && statusCode < 300)
             {
-                return RESULT_OK;
+                return parseTestResponse(response.body());
             }
             else if(statusCode == 401 || statusCode == 403)
             {
-                return RESULT_INVALID_API_KEY;
+                return TestResult.failure(RESULT_INVALID_API_KEY);
             }
 
-            return RESULT_ERROR + " Status Code:" + statusCode;
+            return TestResult.failure(RESULT_ERROR + " Status Code:" + statusCode);
         }
         catch(Exception e)
         {
@@ -765,10 +819,86 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
             if(e instanceof ConnectException || e instanceof CompletionException || throwableCause instanceof ConnectException)
             {
-                return RESULT_NO_SERVER;
+                return TestResult.failure(RESULT_NO_SERVER);
             }
 
-            return safeMessage(e);
+            return TestResult.failure(safeMessage(e));
+        }
+    }
+
+    private static TestResult parseTestResponse(String body)
+    {
+        if(body == null || body.isBlank())
+        {
+            return TestResult.success(null, null, null);
+        }
+
+        try
+        {
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            JsonObject node = root.has("node") && root.get("node").isJsonObject() ? root.getAsJsonObject("node") : null;
+            Integer nodeId = null;
+            String nodeName = null;
+            String serverTimeUtc = root.has("serverTimeUtc") && !root.get("serverTimeUtc").isJsonNull() ?
+                root.get("serverTimeUtc").getAsString() : null;
+
+            if(node != null)
+            {
+                if(node.has("id") && !node.get("id").isJsonNull())
+                {
+                    nodeId = node.get("id").getAsInt();
+                }
+
+                if(node.has("name") && !node.get("name").isJsonNull())
+                {
+                    nodeName = node.get("name").getAsString();
+                }
+            }
+
+            return TestResult.success(nodeId, nodeName, serverTimeUtc);
+        }
+        catch(Exception e)
+        {
+            return TestResult.success(null, null, null);
+        }
+    }
+
+    /**
+     * Detailed connection test result.
+     */
+    public record TestResult(boolean success, String message, Integer nodeId, String nodeName, String serverTimeUtc)
+    {
+        public static TestResult success(Integer nodeId, String nodeName, String serverTimeUtc)
+        {
+            return new TestResult(true, RESULT_OK, nodeId, nodeName, serverTimeUtc);
+        }
+
+        public static TestResult failure(String message)
+        {
+            return new TestResult(false, message, null, null, null);
+        }
+
+        public String displayMessage()
+        {
+            if(!success)
+            {
+                return message;
+            }
+
+            if(nodeName != null && nodeId != null)
+            {
+                return "Authenticated as " + nodeName + " (node " + nodeId + ")";
+            }
+            else if(nodeName != null)
+            {
+                return "Authenticated as " + nodeName;
+            }
+            else if(nodeId != null)
+            {
+                return "Authenticated as node " + nodeId;
+            }
+
+            return RESULT_OK;
         }
     }
 

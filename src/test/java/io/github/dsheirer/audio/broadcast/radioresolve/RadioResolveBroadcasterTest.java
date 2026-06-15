@@ -189,6 +189,24 @@ public class RadioResolveBroadcasterTest
         }
     }
 
+    @Test
+    void testConnectionReturnsResolvedNodeIdentity()
+        throws Exception
+    {
+        try(MockRadioResolveServer server = new MockRadioResolveServer(200))
+        {
+            RadioResolveBroadcaster.TestResult result =
+                RadioResolveBroadcaster.testConnectionDetailed(configuration(server.getHost(), "secret-key"));
+
+            assertTrue(result.success());
+            assertEquals(Integer.valueOf(15), result.nodeId());
+            assertEquals("COLUMBIA", result.nodeName());
+            assertEquals("Authenticated as COLUMBIA (node 15)", result.displayMessage());
+            assertTrue(server.awaitRequests(1));
+            assertEquals("/api/node/test", server.getRequests().get(0).mPath);
+        }
+    }
+
     private static RadioResolveConfiguration configuration(String host, String apiKey)
     {
         RadioResolveConfiguration configuration = new RadioResolveConfiguration();
@@ -379,8 +397,12 @@ public class RadioResolveBroadcasterTest
             throws IOException
         {
             String reason = status >= 200 && status < 300 ? "OK" : "ERROR";
-            byte[] body = reason.getBytes(StandardCharsets.UTF_8);
+            String responseBody = status >= 200 && status < 300 ?
+                "{\"ok\":true,\"node\":{\"id\":15,\"name\":\"COLUMBIA\"},\"serverTimeUtc\":\"2026-06-15T00:00:00Z\"}" :
+                reason;
+            byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
             String response = "HTTP/1.1 " + status + " " + reason + "\r\n" +
+                "Content-Type: application/json\r\n" +
                 "Content-Length: " + body.length + "\r\n" +
                 "Connection: close\r\n\r\n";
             socket.getOutputStream().write(response.getBytes(StandardCharsets.UTF_8));

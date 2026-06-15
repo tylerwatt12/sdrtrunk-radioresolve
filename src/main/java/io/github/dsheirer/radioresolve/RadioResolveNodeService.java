@@ -160,19 +160,29 @@ public class RadioResolveNodeService
 
             if(response.statusCode() >= 200 && response.statusCode() <= 299)
             {
+                configuration.setLastSuccessfulCheckInEpochMilliseconds(mLastCheckInEpochMilliseconds);
+                configuration.setLastCheckInFailureMessage(null);
                 handleCheckInResponse(response.body());
                 return new CheckInResult(true, "RadioResolve check-in accepted");
             }
 
             if(response.statusCode() == 401 || response.statusCode() == 403)
             {
+                configuration.setLastFailedCheckInEpochMilliseconds(mLastCheckInEpochMilliseconds);
+                configuration.setLastCheckInFailureMessage("invalid API key");
                 return new CheckInResult(false, "RadioResolve check-in rejected: invalid API key");
             }
 
+            configuration.setLastFailedCheckInEpochMilliseconds(mLastCheckInEpochMilliseconds);
+            configuration.setLastCheckInFailureMessage("HTTP " + response.statusCode());
             return new CheckInResult(false, "RadioResolve check-in rejected: HTTP " + response.statusCode());
         }
         catch(Exception e)
         {
+            getConfiguration().ifPresent(configuration -> {
+                configuration.setLastFailedCheckInEpochMilliseconds(System.currentTimeMillis());
+                configuration.setLastCheckInFailureMessage(e.getMessage());
+            });
             return new CheckInResult(false, "RadioResolve check-in failed: " + e.getMessage());
         }
         finally

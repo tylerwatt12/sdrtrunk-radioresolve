@@ -19,6 +19,7 @@
 
 package io.github.dsheirer.audio.broadcast.radioresolve;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlProperty;
 import io.github.dsheirer.audio.broadcast.BroadcastConfiguration;
 import io.github.dsheirer.audio.broadcast.BroadcastFormat;
@@ -27,9 +28,12 @@ import java.net.InetAddress;
 import java.time.ZoneId;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.LongProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleLongProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
+import javafx.application.Platform;
 
 /**
  * Streaming configuration for RadioResolve completed call uploads.
@@ -45,6 +49,18 @@ public class RadioResolveConfiguration extends BroadcastConfiguration
     private StringProperty mNodeName = new SimpleStringProperty(getDefaultNodeName());
     private StringProperty mNodeTimezone = new SimpleStringProperty(getDefaultNodeTimezone());
     private BooleanProperty mIgnoreCertificateErrors = new SimpleBooleanProperty(false);
+    private LongProperty mLastSuccessfulUploadEpochMilliseconds = new SimpleLongProperty(0);
+    private LongProperty mLastFailedUploadEpochMilliseconds = new SimpleLongProperty(0);
+    private StringProperty mLastUploadFailureMessage = new SimpleStringProperty();
+    private LongProperty mLastSuccessfulCheckInEpochMilliseconds = new SimpleLongProperty(0);
+    private LongProperty mLastFailedCheckInEpochMilliseconds = new SimpleLongProperty(0);
+    private StringProperty mLastCheckInFailureMessage = new SimpleStringProperty();
+    private volatile long mLastSuccessfulUploadEpochMillisecondsValue;
+    private volatile long mLastFailedUploadEpochMillisecondsValue;
+    private volatile String mLastUploadFailureMessageValue;
+    private volatile long mLastSuccessfulCheckInEpochMillisecondsValue;
+    private volatile long mLastFailedCheckInEpochMillisecondsValue;
+    private volatile String mLastCheckInFailureMessageValue;
 
     /**
      * Constructor for faster jackson.
@@ -101,6 +117,60 @@ public class RadioResolveConfiguration extends BroadcastConfiguration
     public BooleanProperty ignoreCertificateErrorsProperty()
     {
         return mIgnoreCertificateErrors;
+    }
+
+    /**
+     * Last successful upload time as a runtime-only property.
+     */
+    @JsonIgnore
+    public LongProperty lastSuccessfulUploadEpochMillisecondsProperty()
+    {
+        return mLastSuccessfulUploadEpochMilliseconds;
+    }
+
+    /**
+     * Last failed upload time as a runtime-only property.
+     */
+    @JsonIgnore
+    public LongProperty lastFailedUploadEpochMillisecondsProperty()
+    {
+        return mLastFailedUploadEpochMilliseconds;
+    }
+
+    /**
+     * Last upload failure message as a runtime-only property.
+     */
+    @JsonIgnore
+    public StringProperty lastUploadFailureMessageProperty()
+    {
+        return mLastUploadFailureMessage;
+    }
+
+    /**
+     * Last successful node check-in time as a runtime-only property.
+     */
+    @JsonIgnore
+    public LongProperty lastSuccessfulCheckInEpochMillisecondsProperty()
+    {
+        return mLastSuccessfulCheckInEpochMilliseconds;
+    }
+
+    /**
+     * Last failed node check-in time as a runtime-only property.
+     */
+    @JsonIgnore
+    public LongProperty lastFailedCheckInEpochMillisecondsProperty()
+    {
+        return mLastFailedCheckInEpochMilliseconds;
+    }
+
+    /**
+     * Last check-in failure message as a runtime-only property.
+     */
+    @JsonIgnore
+    public StringProperty lastCheckInFailureMessageProperty()
+    {
+        return mLastCheckInFailureMessage;
     }
 
     /**
@@ -179,6 +249,158 @@ public class RadioResolveConfiguration extends BroadcastConfiguration
     public void setIgnoreCertificateErrors(boolean ignoreCertificateErrors)
     {
         mIgnoreCertificateErrors.set(ignoreCertificateErrors);
+    }
+
+    /**
+     * Last successful upload time.
+     */
+    @JsonIgnore
+    public long getLastSuccessfulUploadEpochMilliseconds()
+    {
+        return mLastSuccessfulUploadEpochMillisecondsValue;
+    }
+
+    /**
+     * Sets the last successful upload time.
+     */
+    @JsonIgnore
+    public void setLastSuccessfulUploadEpochMilliseconds(long epochMilliseconds)
+    {
+        mLastSuccessfulUploadEpochMillisecondsValue = epochMilliseconds;
+        setRuntimeProperty(mLastSuccessfulUploadEpochMilliseconds, epochMilliseconds);
+    }
+
+    /**
+     * Last failed upload time.
+     */
+    @JsonIgnore
+    public long getLastFailedUploadEpochMilliseconds()
+    {
+        return mLastFailedUploadEpochMillisecondsValue;
+    }
+
+    /**
+     * Sets the last failed upload time.
+     */
+    @JsonIgnore
+    public void setLastFailedUploadEpochMilliseconds(long epochMilliseconds)
+    {
+        mLastFailedUploadEpochMillisecondsValue = epochMilliseconds;
+        setRuntimeProperty(mLastFailedUploadEpochMilliseconds, epochMilliseconds);
+    }
+
+    /**
+     * Last upload failure message.
+     */
+    @JsonIgnore
+    public String getLastUploadFailureMessage()
+    {
+        return mLastUploadFailureMessageValue;
+    }
+
+    /**
+     * Sets the last upload failure message.
+     */
+    @JsonIgnore
+    public void setLastUploadFailureMessage(String message)
+    {
+        mLastUploadFailureMessageValue = message;
+        setRuntimeProperty(mLastUploadFailureMessage, message);
+    }
+
+    /**
+     * Last successful node check-in time.
+     */
+    @JsonIgnore
+    public long getLastSuccessfulCheckInEpochMilliseconds()
+    {
+        return mLastSuccessfulCheckInEpochMillisecondsValue;
+    }
+
+    /**
+     * Sets the last successful node check-in time.
+     */
+    @JsonIgnore
+    public void setLastSuccessfulCheckInEpochMilliseconds(long epochMilliseconds)
+    {
+        mLastSuccessfulCheckInEpochMillisecondsValue = epochMilliseconds;
+        setRuntimeProperty(mLastSuccessfulCheckInEpochMilliseconds, epochMilliseconds);
+    }
+
+    /**
+     * Last failed node check-in time.
+     */
+    @JsonIgnore
+    public long getLastFailedCheckInEpochMilliseconds()
+    {
+        return mLastFailedCheckInEpochMillisecondsValue;
+    }
+
+    /**
+     * Sets the last failed node check-in time.
+     */
+    @JsonIgnore
+    public void setLastFailedCheckInEpochMilliseconds(long epochMilliseconds)
+    {
+        mLastFailedCheckInEpochMillisecondsValue = epochMilliseconds;
+        setRuntimeProperty(mLastFailedCheckInEpochMilliseconds, epochMilliseconds);
+    }
+
+    /**
+     * Last check-in failure message.
+     */
+    @JsonIgnore
+    public String getLastCheckInFailureMessage()
+    {
+        return mLastCheckInFailureMessageValue;
+    }
+
+    /**
+     * Sets the last check-in failure message.
+     */
+    @JsonIgnore
+    public void setLastCheckInFailureMessage(String message)
+    {
+        mLastCheckInFailureMessageValue = message;
+        setRuntimeProperty(mLastCheckInFailureMessage, message);
+    }
+
+    private static void setRuntimeProperty(LongProperty property, long value)
+    {
+        if(Platform.isFxApplicationThread())
+        {
+            property.set(value);
+        }
+        else
+        {
+            try
+            {
+                Platform.runLater(() -> property.set(value));
+            }
+            catch(IllegalStateException e)
+            {
+                property.set(value);
+            }
+        }
+    }
+
+    private static void setRuntimeProperty(StringProperty property, String value)
+    {
+        if(Platform.isFxApplicationThread())
+        {
+            property.set(value);
+        }
+        else
+        {
+            try
+            {
+                Platform.runLater(() -> property.set(value));
+            }
+            catch(IllegalStateException e)
+            {
+                property.set(value);
+            }
+        }
     }
 
     @JacksonXmlProperty(isAttribute = true, localName = "type", namespace = "http://www.w3.org/2001/XMLSchema-instance")
