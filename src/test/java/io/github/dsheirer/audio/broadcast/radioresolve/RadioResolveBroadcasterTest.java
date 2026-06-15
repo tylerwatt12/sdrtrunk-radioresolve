@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -56,13 +57,9 @@ public class RadioResolveBroadcasterTest
 
             assertEquals("https://calls.example.com/api/node/upload-call", request.uri().toString());
             assertEquals("Bearer secret-key", request.headers().firstValue("Authorization").orElse(null));
-            assertEquals("audio/mpeg", request.headers().firstValue("Content-Type").orElse(null));
+            assertTrue(request.headers().firstValue("Content-Type").orElse("").startsWith("multipart/form-data; boundary="));
             assertEquals("sdrtrunk", request.headers().firstValue("User-Agent").orElse(null));
-            assertEquals(path.getFileName().toString(), request.headers().firstValue("X-Filename").orElse(null));
-            assertEquals(RadioResolveBroadcaster.AGENT_VERSION,
-                request.headers().firstValue("X-Agent-Version").orElse(null));
-            assertEquals("node-a", request.headers().firstValue("X-Node-Hostname").orElse(null));
-            assertEquals("America/New_York", request.headers().firstValue("X-Node-Timezone").orElse(null));
+            assertEquals(HttpClient.Version.HTTP_1_1, request.version().orElse(null));
             assertFalse(request.toString().contains("secret-key"));
         }
         finally
@@ -77,7 +74,8 @@ public class RadioResolveBroadcasterTest
     {
         try(MockRadioResolveServer server = new MockRadioResolveServer(200, 200))
         {
-            RadioResolveBroadcaster broadcaster = new RadioResolveBroadcaster(configuration(server.getHost(), "secret-key"));
+            RadioResolveBroadcaster broadcaster = new RadioResolveBroadcaster(configuration(server.getHost(), "secret-key"),
+                null, null, null);
             AudioRecording recording = recording();
             recording.addPendingReplay();
 
@@ -107,7 +105,8 @@ public class RadioResolveBroadcasterTest
     {
         try(MockRadioResolveServer server = new MockRadioResolveServer(200, 401))
         {
-            RadioResolveBroadcaster broadcaster = new RadioResolveBroadcaster(configuration(server.getHost(), "secret-key"));
+            RadioResolveBroadcaster broadcaster = new RadioResolveBroadcaster(configuration(server.getHost(), "secret-key"),
+                null, null, null);
             AudioRecording recording = recording();
             recording.addPendingReplay();
 
@@ -134,7 +133,8 @@ public class RadioResolveBroadcasterTest
     {
         try(MockRadioResolveServer server = new MockRadioResolveServer(200, 500))
         {
-            RadioResolveBroadcaster broadcaster = new RadioResolveBroadcaster(configuration(server.getHost(), "secret-key"));
+            RadioResolveBroadcaster broadcaster = new RadioResolveBroadcaster(configuration(server.getHost(), "secret-key"),
+                null, null, null);
             AudioRecording recording = recording();
             recording.addPendingReplay();
 
@@ -146,6 +146,40 @@ public class RadioResolveBroadcasterTest
                 assertTrue(waitFor(() -> broadcaster.getAudioErrorCount() == 1, 5000));
                 assertEquals(BroadcastState.TEMPORARY_BROADCAST_ERROR, broadcaster.getBroadcastState());
                 assertTrue(server.awaitRequests(2));
+            }
+            finally
+            {
+                broadcaster.stop();
+                Files.deleteIfExists(recording.getPath());
+            }
+        }
+    }
+
+    @Test
+    void uploadServerErrorRetries()
+        throws Exception
+    {
+        try(MockRadioResolveServer server = new MockRadioResolveServer(200, 500, 200, 200))
+        {
+            RadioResolveConfiguration configuration = configuration(server.getHost(), "secret-key");
+            configuration.setMaximumRecordingAge(60000);
+            RadioResolveBroadcaster broadcaster = new RadioResolveBroadcaster(configuration, null, null, null);
+            AudioRecording recording = recording();
+            recording.addPendingReplay();
+
+            try
+            {
+                broadcaster.start();
+                broadcaster.receive(recording);
+
+                assertTrue(waitFor(() -> broadcaster.getAudioErrorCount() == 1, 5000));
+                assertTrue(waitFor(() -> broadcaster.getStreamedAudioCount() == 1, 12000));
+                assertEquals(BroadcastState.CONNECTED, broadcaster.getBroadcastState());
+                assertTrue(server.awaitRequests(4));
+                assertEquals("/api/node/test", server.getRequests().get(0).mPath);
+                assertEquals("/api/node/upload-call", server.getRequests().get(1).mPath);
+                assertEquals("/api/node/test", server.getRequests().get(2).mPath);
+                assertEquals("/api/node/upload-call", server.getRequests().get(3).mPath);
             }
             finally
             {

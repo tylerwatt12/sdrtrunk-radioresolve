@@ -26,6 +26,8 @@ import io.github.dsheirer.audio.broadcast.BroadcastServerType;
 import java.net.InetAddress;
 import java.time.ZoneId;
 import javafx.beans.binding.Bindings;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 
@@ -42,6 +44,7 @@ public class RadioResolveConfiguration extends BroadcastConfiguration
     private StringProperty mApiKey = new SimpleStringProperty();
     private StringProperty mNodeName = new SimpleStringProperty(getDefaultNodeName());
     private StringProperty mNodeTimezone = new SimpleStringProperty(getDefaultNodeTimezone());
+    private BooleanProperty mIgnoreCertificateErrors = new SimpleBooleanProperty(false);
 
     /**
      * Constructor for faster jackson.
@@ -90,6 +93,24 @@ public class RadioResolveConfiguration extends BroadcastConfiguration
     public StringProperty nodeTimezoneProperty()
     {
         return mNodeTimezone;
+    }
+
+    /**
+     * Ignore certificate errors as a property.
+     */
+    public BooleanProperty ignoreCertificateErrorsProperty()
+    {
+        return mIgnoreCertificateErrors;
+    }
+
+    /**
+     * Sets the RadioResolve server URL. Allows an optional port in the URL, for example
+     * https://calls.example.com:8443. If the user omits a scheme, HTTPS is assumed.
+     */
+    @Override
+    public void setHost(String host)
+    {
+        super.setHost(normalizeHost(host));
     }
 
     /**
@@ -143,6 +164,23 @@ public class RadioResolveConfiguration extends BroadcastConfiguration
         mNodeTimezone.set(nodeTimezone);
     }
 
+    /**
+     * Indicates if HTTPS certificate validation errors should be ignored.
+     */
+    @JacksonXmlProperty(isAttribute = true, localName = "ignore_certificate_errors")
+    public boolean isIgnoreCertificateErrors()
+    {
+        return mIgnoreCertificateErrors.get();
+    }
+
+    /**
+     * Sets if HTTPS certificate validation errors should be ignored.
+     */
+    public void setIgnoreCertificateErrors(boolean ignoreCertificateErrors)
+    {
+        mIgnoreCertificateErrors.set(ignoreCertificateErrors);
+    }
+
     @JacksonXmlProperty(isAttribute = true, localName = "type", namespace = "http://www.w3.org/2001/XMLSchema-instance")
     @Override
     public BroadcastServerType getBroadcastServerType()
@@ -159,6 +197,7 @@ public class RadioResolveConfiguration extends BroadcastConfiguration
         copy.setApiKey(getApiKey());
         copy.setNodeName(getNodeName());
         copy.setNodeTimezone(getNodeTimezone());
+        copy.setIgnoreCertificateErrors(isIgnoreCertificateErrors());
         copy.setMaximumRecordingAge(getMaximumRecordingAge());
         copy.setDelay(getDelay());
         copy.setEnabled(isEnabled());
@@ -193,5 +232,25 @@ public class RadioResolveConfiguration extends BroadcastConfiguration
     public static String getDefaultNodeTimezone()
     {
         return ZoneId.systemDefault().getId();
+    }
+
+    /**
+     * Normalizes a user-entered RadioResolve server URL.
+     */
+    public static String normalizeHost(String host)
+    {
+        String normalized = host != null ? host.trim() : "";
+
+        while(normalized.endsWith("/"))
+        {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+
+        if(!normalized.isBlank() && !normalized.matches("(?i)^https?://.*"))
+        {
+            normalized = "https://" + normalized;
+        }
+
+        return normalized;
     }
 }

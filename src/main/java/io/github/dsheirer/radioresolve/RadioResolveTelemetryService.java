@@ -22,6 +22,7 @@ package io.github.dsheirer.radioresolve;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import io.github.dsheirer.alias.Alias;
+import io.github.dsheirer.audio.broadcast.radioresolve.RadioResolveBroadcaster;
 import io.github.dsheirer.audio.broadcast.radioresolve.RadioResolveConfiguration;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.module.ProcessingChain;
@@ -30,7 +31,6 @@ import io.github.dsheirer.module.decode.p25.telemetry.P25NetworkConfigurationSna
 import io.github.dsheirer.playlist.PlaylistManager;
 import io.github.dsheirer.preference.radioresolve.RadioResolvePreference;
 import io.github.dsheirer.util.ThreadPool;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -61,7 +61,6 @@ public class RadioResolveTelemetryService
     private final RadioResolvePreference mPreference;
     private final Supplier<Optional<RadioResolveConfiguration>> mConfigurationSupplier;
     private final PlaylistManager mPlaylistManager;
-    private final HttpClient mHttpClient;
     private final Map<Channel,TelemetryState> mStateByChannel = new HashMap<>();
     private final AtomicBoolean mScanRunning = new AtomicBoolean();
     private ScheduledFuture<?> mScanFuture;
@@ -79,7 +78,6 @@ public class RadioResolveTelemetryService
         mPreference = preference;
         mConfigurationSupplier = configurationSupplier;
         mPlaylistManager = playlistManager;
-        mHttpClient = HttpClient.newBuilder().connectTimeout(HTTP_TIMEOUT).build();
     }
 
     /**
@@ -213,7 +211,8 @@ public class RadioResolveTelemetryService
                     observedAt).toString()))
                 .build();
 
-            HttpResponse<String> response = mHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = RadioResolveBroadcaster.createHttpClient(configuration)
+                .send(request, HttpResponse.BodyHandlers.ofString());
 
             if(response.statusCode() >= 200 && response.statusCode() <= 299)
             {

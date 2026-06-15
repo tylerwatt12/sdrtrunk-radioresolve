@@ -29,6 +29,7 @@ import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
@@ -43,6 +44,7 @@ public class RadioResolveEditor extends AbstractBroadcastEditor<RadioResolveConf
     private TextField mHostTextField;
     private TextField mNodeNameTextField;
     private TextField mNodeTimezoneTextField;
+    private CheckBox mIgnoreCertificateErrorsCheckBox;
     private IntegerTextField mMaxAgeTextField;
     private Button mTestButton;
     private GridPane mEditorPane;
@@ -65,6 +67,7 @@ public class RadioResolveEditor extends AbstractBroadcastEditor<RadioResolveConf
         getHostTextField().setDisable(item == null);
         getNodeNameTextField().setDisable(item == null);
         getNodeTimezoneTextField().setDisable(item == null);
+        getIgnoreCertificateErrorsCheckBox().setDisable(item == null);
         getMaxAgeTextField().setDisable(item == null);
         getTestButton().setDisable(item == null);
 
@@ -74,6 +77,7 @@ public class RadioResolveEditor extends AbstractBroadcastEditor<RadioResolveConf
             getHostTextField().setText(item.getHost());
             getNodeNameTextField().setText(item.getNodeName());
             getNodeTimezoneTextField().setText(item.getNodeTimezone());
+            getIgnoreCertificateErrorsCheckBox().setSelected(item.isIgnoreCertificateErrors());
             getMaxAgeTextField().set((int)(item.getMaximumRecordingAge() / 1000));
         }
         else
@@ -82,6 +86,7 @@ public class RadioResolveEditor extends AbstractBroadcastEditor<RadioResolveConf
             getHostTextField().setText(null);
             getNodeNameTextField().setText(null);
             getNodeTimezoneTextField().setText(null);
+            getIgnoreCertificateErrorsCheckBox().setSelected(false);
             getMaxAgeTextField().set(0);
         }
 
@@ -102,6 +107,7 @@ public class RadioResolveEditor extends AbstractBroadcastEditor<RadioResolveConf
             getItem().setHost(getHostTextField().getText());
             getItem().setNodeName(getNodeNameTextField().getText());
             getItem().setNodeTimezone(getNodeTimezoneTextField().getText());
+            getItem().setIgnoreCertificateErrors(getIgnoreCertificateErrorsCheckBox().isSelected());
             getItem().setMaximumRecordingAge(getMaxAgeSeconds() * 1000L);
         }
 
@@ -182,6 +188,14 @@ public class RadioResolveEditor extends AbstractBroadcastEditor<RadioResolveConf
             GridPane.setConstraints(getNodeTimezoneTextField(), 1, row);
             mEditorPane.getChildren().add(getNodeTimezoneTextField());
 
+            Label ignoreCertificateErrorsLabel = new Label("Ignore Certificate Errors");
+            GridPane.setHalignment(ignoreCertificateErrorsLabel, HPos.RIGHT);
+            GridPane.setConstraints(ignoreCertificateErrorsLabel, 0, ++row);
+            mEditorPane.getChildren().add(ignoreCertificateErrorsLabel);
+
+            GridPane.setConstraints(getIgnoreCertificateErrorsCheckBox(), 1, row);
+            mEditorPane.getChildren().add(getIgnoreCertificateErrorsCheckBox());
+
             Label maxAgeLabel = new Label("Max Recording Age (seconds)");
             GridPane.setHalignment(maxAgeLabel, HPos.RIGHT);
             GridPane.setConstraints(maxAgeLabel, 0, ++row);
@@ -245,6 +259,19 @@ public class RadioResolveEditor extends AbstractBroadcastEditor<RadioResolveConf
         return mNodeTimezoneTextField;
     }
 
+    private CheckBox getIgnoreCertificateErrorsCheckBox()
+    {
+        if(mIgnoreCertificateErrorsCheckBox == null)
+        {
+            mIgnoreCertificateErrorsCheckBox = new CheckBox();
+            mIgnoreCertificateErrorsCheckBox.setDisable(true);
+            mIgnoreCertificateErrorsCheckBox.selectedProperty().addListener((observable, oldValue, newValue) ->
+                modifiedProperty().set(true));
+        }
+
+        return mIgnoreCertificateErrorsCheckBox;
+    }
+
     private IntegerTextField getMaxAgeTextField()
     {
         if(mMaxAgeTextField == null)
@@ -299,6 +326,7 @@ public class RadioResolveEditor extends AbstractBroadcastEditor<RadioResolveConf
         configToTest.setApiKey(apiKey);
         configToTest.setNodeName(getNodeNameTextField().getText());
         configToTest.setNodeTimezone(getNodeTimezoneTextField().getText());
+        configToTest.setIgnoreCertificateErrors(getIgnoreCertificateErrorsCheckBox().isSelected());
 
         String result = RadioResolveBroadcaster.testConnection(configToTest);
 

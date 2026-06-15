@@ -35,6 +35,7 @@ public class RadioResolveConfigurationTest
         assertEquals(RadioResolveConfiguration.PRODUCTION_ENDPOINT, configuration.getHost());
         assertNotNull(configuration.getNodeName());
         assertNotNull(configuration.getNodeTimezone());
+        assertFalse(configuration.isIgnoreCertificateErrors());
         assertFalse(configuration.isValid());
 
         configuration.setApiKey("test-key");
@@ -46,10 +47,11 @@ public class RadioResolveConfigurationTest
     {
         RadioResolveConfiguration configuration = new RadioResolveConfiguration();
         configuration.setName("RadioResolve");
-        configuration.setHost("https://calls.example.com");
+        configuration.setHost("https://calls.example.com:8443");
         configuration.setApiKey("test-key");
         configuration.setNodeName("node-a");
         configuration.setNodeTimezone("America/New_York");
+        configuration.setIgnoreCertificateErrors(true);
         configuration.setMaximumRecordingAge(123000);
         configuration.setDelay(1000);
         configuration.setEnabled(true);
@@ -61,9 +63,32 @@ public class RadioResolveConfigurationTest
         assertEquals(configuration.getApiKey(), copy.getApiKey());
         assertEquals(configuration.getNodeName(), copy.getNodeName());
         assertEquals(configuration.getNodeTimezone(), copy.getNodeTimezone());
+        assertEquals(configuration.isIgnoreCertificateErrors(), copy.isIgnoreCertificateErrors());
         assertEquals(configuration.getMaximumRecordingAge(), copy.getMaximumRecordingAge());
         assertEquals(configuration.getDelay(), copy.getDelay());
         assertEquals(configuration.isEnabled(), copy.isEnabled());
+    }
+
+    @Test
+    void hostAllowsExplicitPort()
+    {
+        RadioResolveConfiguration configuration = new RadioResolveConfiguration();
+
+        configuration.setHost("https://calls.example.com:8443/");
+        assertEquals("https://calls.example.com:8443", configuration.getHost());
+        assertEquals("https://calls.example.com:8443/api/node/upload-call",
+            RadioResolveBroadcaster.createUri(configuration.getHost(), RadioResolveBroadcaster.UPLOAD_PATH).toString());
+    }
+
+    @Test
+    void hostDefaultsToHttpsWhenSchemeOmitted()
+    {
+        RadioResolveConfiguration configuration = new RadioResolveConfiguration();
+
+        configuration.setHost("calls.example.com:9443");
+        assertEquals("https://calls.example.com:9443", configuration.getHost());
+        assertEquals("https://calls.example.com:9443/api/node/test",
+            RadioResolveBroadcaster.createUri(configuration.getHost(), RadioResolveBroadcaster.TEST_PATH).toString());
     }
 
     @Test
@@ -72,10 +97,11 @@ public class RadioResolveConfigurationTest
     {
         RadioResolveConfiguration configuration = new RadioResolveConfiguration();
         configuration.setName("RadioResolve");
-        configuration.setHost("https://calls.example.com");
+        configuration.setHost("https://calls.example.com:8443");
         configuration.setApiKey("test-key");
         configuration.setNodeName("node-a");
         configuration.setNodeTimezone("America/New_York");
+        configuration.setIgnoreCertificateErrors(true);
 
         PlaylistV2 playlist = new PlaylistV2();
         List<BroadcastConfiguration> configurations = new ArrayList<>();
@@ -93,9 +119,10 @@ public class RadioResolveConfigurationTest
         assertInstanceOf(RadioResolveConfiguration.class, restoredConfiguration);
 
         RadioResolveConfiguration restoredRadioResolve = (RadioResolveConfiguration)restoredConfiguration;
-        assertEquals("https://calls.example.com", restoredRadioResolve.getHost());
+        assertEquals("https://calls.example.com:8443", restoredRadioResolve.getHost());
         assertEquals("test-key", restoredRadioResolve.getApiKey());
         assertEquals("node-a", restoredRadioResolve.getNodeName());
         assertEquals("America/New_York", restoredRadioResolve.getNodeTimezone());
+        assertTrue(restoredRadioResolve.isIgnoreCertificateErrors());
     }
 }

@@ -48,17 +48,21 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.time.Duration;
-import java.util.Queue;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,17 +81,19 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     public static final String RESULT_NO_SERVER = "No Response";
     public static final String RESULT_ERROR = "Error";
     private static final String MULTIPART_FORM_DATA = "multipart/form-data";
+    private static final int MAX_QUEUED_RECORDINGS = 500;
+    private static final int MAX_IN_FLIGHT_UPLOADS = 4;
+    private static final long[] RETRY_BACKOFF_MS = {5000, 15000, 30000, 60000, 120000};
 
-    private Queue<AudioRecording> mAudioRecordingQueue = new LinkedTransferQueue<>();
+    private final Object mQueueLock = new Object();
+    private Deque<PendingUpload> mAudioRecordingQueue = new ArrayDeque<>();
     private ScheduledFuture<?> mAudioRecordingProcessorFuture;
-    private HttpClient mHttpClient = HttpClient.newBuilder()
-        .version(HttpClient.Version.HTTP_2)
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .connectTimeout(Duration.ofSeconds(20))
-        .build();
+    private HttpClient mHttpClient;
+    private AtomicInteger mInFlightUploads = new AtomicInteger();
     private long mLastConnectionAttempt;
     private long mConnectionAttemptInterval = 5000;
     private AliasModel mAliasModel;
+    private volatile boolean mRunning;
 
     /**
      * Constructs an instance.
@@ -97,6 +103,7 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     {
         super(config);
         mAliasModel = aliasModel;
+        mHttpClient = createHttpClient(config);
     }
 
     /**
@@ -105,6 +112,7 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     @Override
     public void start()
     {
+        mRunning = true;
         setBroadcastState(BroadcastState.CONNECTING);
         updateConnectionState(testConnection(getBroadcastConfiguration()), "connecting to");
         mLastConnectionAttempt = System.currentTimeMillis();
@@ -122,6 +130,8 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     @Override
     public void stop()
     {
+        mRunning = false;
+
         if(mAudioRecordingProcessorFuture != null)
         {
             mAudioRecordingProcessorFuture.cancel(true);
@@ -137,25 +147,42 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     @Override
     public void dispose()
     {
-        AudioRecording audioRecording = mAudioRecordingQueue.poll();
+        PendingUpload pendingUpload;
 
-        while(audioRecording != null)
+        synchronized(mQueueLock)
         {
-            audioRecording.removePendingReplay();
-            audioRecording = mAudioRecordingQueue.poll();
+            pendingUpload = mAudioRecordingQueue.poll();
+        }
+
+        while(pendingUpload != null)
+        {
+            pendingUpload.getAudioRecording().removePendingReplay();
+
+            synchronized(mQueueLock)
+            {
+                pendingUpload = mAudioRecordingQueue.poll();
+            }
         }
     }
 
     @Override
     public int getAudioQueueSize()
     {
-        return mAudioRecordingQueue.size();
+        synchronized(mQueueLock)
+        {
+            return mAudioRecordingQueue.size();
+        }
     }
 
     @Override
     public void receive(AudioRecording audioRecording)
     {
-        mAudioRecordingQueue.offer(audioRecording);
+        synchronized(mQueueLock)
+        {
+            mAudioRecordingQueue.offer(new PendingUpload(audioRecording));
+            ageOffOverflowRecordings();
+        }
+
         broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_QUEUE_CHANGE));
     }
 
@@ -220,21 +247,36 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
      */
     private void processRecordingQueue()
     {
-        while(connected() && !mAudioRecordingQueue.isEmpty())
+        ageOffInvalidRecordings();
+
+        while(connected() && mInFlightUploads.get() < MAX_IN_FLIGHT_UPLOADS)
         {
-            final AudioRecording audioRecording = mAudioRecordingQueue.poll();
-            broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_QUEUE_CHANGE));
+            final PendingUpload pendingUpload = getNextReadyUpload();
+
+            if(pendingUpload == null)
+            {
+                return;
+            }
+
+            final AudioRecording audioRecording = pendingUpload.getAudioRecording();
 
             if(isValid(audioRecording) && audioRecording.getRecordingLength() > 0)
             {
                 try
                 {
                     HttpRequest fileRequest = createUploadRequest(getBroadcastConfiguration(), audioRecording, mAliasModel);
+                    mInFlightUploads.incrementAndGet();
 
                     mHttpClient.sendAsync(fileRequest, HttpResponse.BodyHandlers.ofString())
                         .whenComplete((fileResponse, throwable) -> {
-                            handleUploadResponse(fileResponse, throwable);
-                            audioRecording.removePendingReplay();
+                            try
+                            {
+                                handleUploadResponse(pendingUpload, fileResponse, throwable);
+                            }
+                            finally
+                            {
+                                mInFlightUploads.decrementAndGet();
+                            }
                         });
                 }
                 catch(FileNotFoundException fnfe)
@@ -250,7 +292,7 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
                     setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
                     incrementErrorAudioCount();
                     broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
-                    audioRecording.removePendingReplay();
+                    retryOrRemove(pendingUpload, safeMessage(e));
                 }
             }
             else if(audioRecording != null)
@@ -258,20 +300,19 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
                 audioRecording.removePendingReplay();
             }
         }
-
-        ageOffInvalidRecordings();
     }
 
     /**
      * Handles an upload response.
      */
-    private void handleUploadResponse(HttpResponse<String> fileResponse, Throwable throwable)
+    private void handleUploadResponse(PendingUpload pendingUpload, HttpResponse<String> fileResponse, Throwable throwable)
     {
         if(throwable != null)
         {
             setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
             incrementErrorAudioCount();
             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
+            retryOrRemove(pendingUpload, "temporary upload failure");
             return;
         }
 
@@ -281,6 +322,7 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
         {
             incrementStreamedAudioCount();
             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_STREAMED_COUNT_CHANGE));
+            pendingUpload.getAudioRecording().removePendingReplay();
         }
         else if(statusCode == 401 || statusCode == 403)
         {
@@ -288,6 +330,15 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
             incrementErrorAudioCount();
             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
             mLog.error("RadioResolve upload rejected [invalid API key or access denied]");
+            pendingUpload.getAudioRecording().removePendingReplay();
+        }
+        else if(isRetryableStatus(statusCode))
+        {
+            setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+            incrementErrorAudioCount();
+            broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
+            mLog.error("RadioResolve upload failed [status " + statusCode + "]");
+            retryOrRemove(pendingUpload, "status " + statusCode);
         }
         else
         {
@@ -295,6 +346,74 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
             incrementErrorAudioCount();
             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
             mLog.error("RadioResolve upload failed [status " + statusCode + "]");
+            pendingUpload.getAudioRecording().removePendingReplay();
+        }
+    }
+
+    private boolean isRetryableStatus(int statusCode)
+    {
+        return statusCode == 408 || statusCode == 429 || statusCode == 500 || statusCode == 502 ||
+            statusCode == 503 || statusCode == 504;
+    }
+
+    private PendingUpload getNextReadyUpload()
+    {
+        PendingUpload pendingUpload = null;
+        long now = System.currentTimeMillis();
+
+        synchronized(mQueueLock)
+        {
+            int size = mAudioRecordingQueue.size();
+
+            for(int x = 0; x < size; x++)
+            {
+                PendingUpload candidate = mAudioRecordingQueue.poll();
+
+                if(candidate == null)
+                {
+                    break;
+                }
+
+                if(pendingUpload == null && candidate.getNextAttemptTime() <= now)
+                {
+                    pendingUpload = candidate;
+                }
+                else
+                {
+                    mAudioRecordingQueue.offer(candidate);
+                }
+            }
+        }
+
+        if(pendingUpload != null)
+        {
+            broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_QUEUE_CHANGE));
+        }
+
+        return pendingUpload;
+    }
+
+    private void retryOrRemove(PendingUpload pendingUpload, String reason)
+    {
+        if(mRunning && isValid(pendingUpload.getAudioRecording()))
+        {
+            pendingUpload.retry();
+
+            synchronized(mQueueLock)
+            {
+                mAudioRecordingQueue.offer(pendingUpload);
+                ageOffOverflowRecordings();
+            }
+
+            mLog.info("RadioResolve upload retry scheduled [" + reason + "] attempt [" +
+                pendingUpload.getAttemptCount() + "]");
+            broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_QUEUE_CHANGE));
+        }
+        else
+        {
+            pendingUpload.getAudioRecording().removePendingReplay();
+            incrementAgedOffAudioCount();
+            broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_AGED_OFF_COUNT_CHANGE));
         }
     }
 
@@ -303,20 +422,53 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
      */
     private void ageOffInvalidRecordings()
     {
-        AudioRecording audioRecording = mAudioRecordingQueue.peek();
+        boolean changed = false;
 
-        while(audioRecording != null)
+        synchronized(mQueueLock)
         {
-            if(isValid(audioRecording))
-            {
-                return;
-            }
+            int size = mAudioRecordingQueue.size();
 
-            mAudioRecordingQueue.poll();
-            audioRecording.removePendingReplay();
-            incrementAgedOffAudioCount();
+            for(int x = 0; x < size; x++)
+            {
+                PendingUpload pendingUpload = mAudioRecordingQueue.poll();
+
+                if(pendingUpload == null)
+                {
+                    break;
+                }
+
+                if(isValid(pendingUpload.getAudioRecording()))
+                {
+                    mAudioRecordingQueue.offer(pendingUpload);
+                }
+                else
+                {
+                    pendingUpload.getAudioRecording().removePendingReplay();
+                    incrementAgedOffAudioCount();
+                    changed = true;
+                }
+            }
+        }
+
+        if(changed)
+        {
             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_AGED_OFF_COUNT_CHANGE));
-            audioRecording = mAudioRecordingQueue.peek();
+            broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_QUEUE_CHANGE));
+        }
+    }
+
+    private void ageOffOverflowRecordings()
+    {
+        while(mAudioRecordingQueue.size() > MAX_QUEUED_RECORDINGS)
+        {
+            PendingUpload pendingUpload = mAudioRecordingQueue.poll();
+
+            if(pendingUpload != null)
+            {
+                pendingUpload.getAudioRecording().removePendingReplay();
+                incrementAgedOffAudioCount();
+                broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_AGED_OFF_COUNT_CHANGE));
+            }
         }
     }
 
@@ -337,9 +489,8 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     {
         Path path = audioRecording.getPath();
         String filename = path.getFileName() != null ? path.getFileName().toString() : path.toString();
-        byte[] audioBytes = Files.readAllBytes(path);
         RadioResolveBuilder bodyBuilder = new RadioResolveBuilder();
-        bodyBuilder.addFile(audioBytes, filename)
+        bodyBuilder.addFile(path, filename)
             .addPart("call_time_ms", audioRecording.getStartTime())
             .addPart("duration_sec", formatSeconds(audioRecording.getRecordingLength()))
             .addPart("target_id", getTo(audioRecording, aliasModel))
@@ -360,6 +511,7 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
         return HttpRequest.newBuilder()
             .uri(createUri(configuration.getHost(), UPLOAD_PATH))
+            .version(HttpClient.Version.HTTP_1_1)
             .header(HttpHeaders.AUTHORIZATION, "Bearer " + configuration.getApiKey())
             .header(HttpHeaders.CONTENT_TYPE, MULTIPART_FORM_DATA + "; boundary=" + bodyBuilder.getBoundary())
             .header(HttpHeaders.USER_AGENT, "sdrtrunk")
@@ -384,6 +536,11 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
     private static Long getFrequency(AudioRecording audioRecording)
     {
+        if(!audioRecording.hasIdentifierCollection())
+        {
+            return null;
+        }
+
         Identifier identifier = audioRecording.getIdentifierCollection().getIdentifier(IdentifierClass.CONFIGURATION,
             Form.CHANNEL_FREQUENCY, Role.ANY);
 
@@ -397,6 +554,11 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
     private static String getFrom(AudioRecording audioRecording)
     {
+        if(!audioRecording.hasIdentifierCollection())
+        {
+            return "0";
+        }
+
         for(Identifier identifier: audioRecording.getIdentifierCollection().getIdentifiers(Role.FROM))
         {
             if(identifier instanceof RadioIdentifier radioIdentifier)
@@ -410,6 +572,11 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
     private static String getTalkerAlias(AudioRecording audioRecording)
     {
+        if(!audioRecording.hasIdentifierCollection())
+        {
+            return null;
+        }
+
         for(Identifier identifier: audioRecording.getIdentifierCollection().getIdentifiers(Role.FROM))
         {
             if(identifier instanceof TalkerAliasIdentifier talkerAliasIdentifier && talkerAliasIdentifier.isValid())
@@ -423,6 +590,11 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
     private static String getTo(AudioRecording audioRecording, AliasModel aliasModel)
     {
+        if(!audioRecording.hasIdentifierCollection())
+        {
+            return "0";
+        }
+
         Identifier identifier = audioRecording.getIdentifierCollection().getToIdentifier();
 
         if(identifier != null)
@@ -472,6 +644,11 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
     private static Alias getFirstToAlias(AudioRecording audioRecording, AliasModel aliasModel)
     {
+        if(!audioRecording.hasIdentifierCollection())
+        {
+            return null;
+        }
+
         AliasList aliasList = getAliasList(audioRecording, aliasModel);
         Identifier identifier = audioRecording.getIdentifierCollection().getToIdentifier();
 
@@ -490,11 +667,17 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
     private static AliasList getAliasList(AudioRecording audioRecording, AliasModel aliasModel)
     {
-        return aliasModel != null ? aliasModel.getAliasList(audioRecording.getIdentifierCollection()) : null;
+        return aliasModel != null && audioRecording.hasIdentifierCollection() ?
+            aliasModel.getAliasList(audioRecording.getIdentifierCollection()) : null;
     }
 
     private static String getPatches(AudioRecording audioRecording)
     {
+        if(!audioRecording.hasIdentifierCollection())
+        {
+            return null;
+        }
+
         Identifier identifier = audioRecording.getIdentifierCollection().getToIdentifier();
 
         if(identifier instanceof PatchGroupIdentifier patchGroupIdentifier)
@@ -523,6 +706,11 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
     private static String getConfigurationIdentifier(AudioRecording audioRecording, Form form)
     {
+        if(!audioRecording.hasIdentifierCollection())
+        {
+            return null;
+        }
+
         Identifier identifier = audioRecording.getIdentifierCollection().getIdentifier(IdentifierClass.CONFIGURATION,
             form, Role.ANY);
         return identifier != null && identifier.isValid() ? identifier.toString() : null;
@@ -530,6 +718,11 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
 
     private static String getDecoderIdentifier(AudioRecording audioRecording, Form form)
     {
+        if(!audioRecording.hasIdentifierCollection())
+        {
+            return null;
+        }
+
         Identifier identifier = audioRecording.getIdentifierCollection().getIdentifier(IdentifierClass.DECODER,
             form, Role.BROADCAST);
         return identifier != null && identifier.isValid() ? identifier.toString() : null;
@@ -540,14 +733,11 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
      */
     public static String testConnection(RadioResolveConfiguration configuration)
     {
-        HttpClient httpClient = HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_1_1)
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .connectTimeout(Duration.ofSeconds(20))
-            .build();
+        HttpClient httpClient = createHttpClient(configuration);
 
         HttpRequest request = HttpRequest.newBuilder()
             .uri(createUri(configuration.getHost(), TEST_PATH))
+            .version(HttpClient.Version.HTTP_1_1)
             .header(HttpHeaders.AUTHORIZATION, "Bearer " + configuration.getApiKey())
             .header(HttpHeaders.USER_AGENT, "sdrtrunk")
             .GET()
@@ -583,17 +773,72 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
     }
 
     /**
+     * Creates an HTTP client for RadioResolve API requests.
+     */
+    public static HttpClient createHttpClient(RadioResolveConfiguration configuration)
+    {
+        HttpClient.Builder builder = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .connectTimeout(Duration.ofSeconds(20));
+
+        if(configuration != null && configuration.isIgnoreCertificateErrors())
+        {
+            try
+            {
+                builder.sslContext(createTrustAllSSLContext());
+                SSLParameters sslParameters = new SSLParameters();
+                sslParameters.setEndpointIdentificationAlgorithm("");
+                builder.sslParameters(sslParameters);
+            }
+            catch(Exception e)
+            {
+                mLog.error("Unable to configure RadioResolve certificate error bypass [" + safeMessage(e) + "]");
+            }
+        }
+
+        return builder.build();
+    }
+
+    /**
+     * Creates an SSL context that trusts all certificates. Only used when the user explicitly enables
+     * Ignore Certificate Errors for the RadioResolve stream.
+     */
+    private static SSLContext createTrustAllSSLContext()
+        throws Exception
+    {
+        TrustManager[] trustManagers = new TrustManager[] {
+            new X509TrustManager()
+            {
+                @Override
+                public java.security.cert.X509Certificate[] getAcceptedIssuers()
+                {
+                    return new java.security.cert.X509Certificate[0];
+                }
+
+                @Override
+                public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType)
+                {
+                }
+
+                @Override
+                public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType)
+                {
+                }
+            }
+        };
+
+        SSLContext sslContext = SSLContext.getInstance("TLS");
+        sslContext.init(null, trustManagers, new java.security.SecureRandom());
+        return sslContext;
+    }
+
+    /**
      * Creates an endpoint URI from a host value and API path.
      */
     static URI createUri(String host, String path)
     {
-        String base = host != null ? host.trim() : "";
-
-        while(base.endsWith("/"))
-        {
-            base = base.substring(0, base.length() - 1);
-        }
-
+        String base = RadioResolveConfiguration.normalizeHost(host);
         return URI.create(base + path);
     }
 
@@ -633,6 +878,41 @@ public class RadioResolveBroadcaster extends AbstractAudioBroadcaster<RadioResol
         public void run()
         {
             processRecordingQueue();
+        }
+    }
+
+    private static class PendingUpload
+    {
+        private AudioRecording mAudioRecording;
+        private int mAttemptCount;
+        private long mNextAttemptTime;
+
+        PendingUpload(AudioRecording audioRecording)
+        {
+            mAudioRecording = audioRecording;
+            mNextAttemptTime = System.currentTimeMillis();
+        }
+
+        AudioRecording getAudioRecording()
+        {
+            return mAudioRecording;
+        }
+
+        int getAttemptCount()
+        {
+            return mAttemptCount;
+        }
+
+        long getNextAttemptTime()
+        {
+            return mNextAttemptTime;
+        }
+
+        void retry()
+        {
+            mAttemptCount++;
+            int backoffIndex = Math.min(mAttemptCount - 1, RETRY_BACKOFF_MS.length - 1);
+            mNextAttemptTime = System.currentTimeMillis() + RETRY_BACKOFF_MS[backoffIndex];
         }
     }
 }

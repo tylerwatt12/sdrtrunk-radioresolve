@@ -22,6 +22,7 @@ package io.github.dsheirer.audio.broadcast.radioresolve;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.http.HttpRequest;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,7 +36,7 @@ public class RadioResolveBuilder
     private static final String BOUNDARY = "--sdrtrunk-radioresolve-sdrtrunk";
     private static final String CRLF = "\r\n";
     private List<Part> mParts = new ArrayList<>();
-    private byte[] mAudioBytes;
+    private Path mAudioPath;
     private String mAudioName = "audio.mp3";
 
     public String getBoundary()
@@ -43,9 +44,9 @@ public class RadioResolveBuilder
         return BOUNDARY;
     }
 
-    public RadioResolveBuilder addFile(byte[] value, String audioName)
+    public RadioResolveBuilder addFile(Path path, String audioName)
     {
-        mAudioBytes = value;
+        mAudioPath = path;
 
         if(audioName != null && !audioName.isBlank())
         {
@@ -84,11 +85,14 @@ public class RadioResolveBuilder
             outputStream.write(formatPart(part).getBytes(StandardCharsets.UTF_8));
         }
 
-        if(mAudioBytes != null)
+        if(mAudioPath != null)
         {
             outputStream.write(formatFilePart().getBytes(StandardCharsets.UTF_8));
-            outputStream.write(mAudioBytes);
-            outputStream.write(CRLF.getBytes(StandardCharsets.UTF_8));
+            HttpRequest.BodyPublisher prefix = HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray());
+            HttpRequest.BodyPublisher file = HttpRequest.BodyPublishers.ofFile(mAudioPath);
+            HttpRequest.BodyPublisher suffix = HttpRequest.BodyPublishers.ofString(CRLF + getClosingBoundary(),
+                StandardCharsets.UTF_8);
+            return HttpRequest.BodyPublishers.concat(prefix, file, suffix);
         }
 
         outputStream.write(getClosingBoundary().getBytes(StandardCharsets.UTF_8));

@@ -23,12 +23,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import io.github.dsheirer.audio.broadcast.radioresolve.RadioResolveBroadcaster;
 import io.github.dsheirer.audio.broadcast.radioresolve.RadioResolveConfiguration;
 import io.github.dsheirer.preference.radioresolve.RadioResolvePreference;
 import io.github.dsheirer.util.ThreadPool;
 import java.lang.management.ManagementFactory;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -55,7 +55,6 @@ public class RadioResolveNodeService
 
     private final RadioResolvePreference mPreference;
     private final Supplier<Optional<RadioResolveConfiguration>> mConfigurationSupplier;
-    private final HttpClient mHttpClient;
     private final AtomicBoolean mCheckInRunning = new AtomicBoolean();
     private ScheduledFuture<?> mCheckInFuture;
     private long mLastCheckInEpochMilliseconds;
@@ -71,7 +70,6 @@ public class RadioResolveNodeService
     {
         mPreference = preference;
         mConfigurationSupplier = configurationSupplier;
-        mHttpClient = HttpClient.newBuilder().connectTimeout(HTTP_TIMEOUT).build();
     }
 
     /**
@@ -156,7 +154,8 @@ public class RadioResolveNodeService
                 .POST(HttpRequest.BodyPublishers.ofString(createCheckInPayload(configuration).toString()))
                 .build();
 
-            HttpResponse<String> response = mHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = RadioResolveBroadcaster.createHttpClient(configuration)
+                .send(request, HttpResponse.BodyHandlers.ofString());
             mLastCheckInEpochMilliseconds = System.currentTimeMillis();
 
             if(response.statusCode() >= 200 && response.statusCode() <= 299)
@@ -374,7 +373,8 @@ public class RadioResolveNodeService
                 .POST(HttpRequest.BodyPublishers.ofString(root.toString()))
                 .build();
 
-            mHttpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding());
+            RadioResolveBroadcaster.createHttpClient(configuration)
+                .sendAsync(request, HttpResponse.BodyHandlers.discarding());
         }
         catch(Exception e)
         {

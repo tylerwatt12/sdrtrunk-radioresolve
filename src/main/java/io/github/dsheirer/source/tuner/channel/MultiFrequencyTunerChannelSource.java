@@ -81,27 +81,27 @@ public class MultiFrequencyTunerChannelSource extends TunerChannelSource
     {
         if(mChangingChannels.compareAndSet(false, true))
         {
-            long previousFrequency = getFrequency();
             long frequency = getNextFrequency();
 
             if(frequency == 0)
             {
-                mLog.info("Ignoring frequency rotation request - no alternate frequencies are available for [" +
-                        getDiagnosticInformation() + "]");
                 mChangingChannels.set(false);
                 return;
             }
 
-            mLog.info("Frequency rotation requested from [" + previousFrequency + "] to [" + frequency + "] for [" +
-                    getDiagnosticInformation() + "]");
-
             if(mTunerChannelSource != null)
             {
-                shutdownCurrentSource();
+                //Shutdown the existing tuner channel source
+                mTunerChannelSource.stop();
+                mTunerChannelSource.setListener(null);
+                mTunerChannelSource.removeSourceEventListener();
+                mTunerChannelSource.removeHeartbeatListener(mHeartbeatListener);
+                mTunerChannelSource.dispose();
+                mTunerChannelSource = null;
             }
 
             //Request the next tuner channel source
-            getNextSource(getTunerChannel(frequency), previousFrequency);
+            getNextSource(getTunerChannel(frequency));
         }
     }
 
@@ -114,30 +114,20 @@ public class MultiFrequencyTunerChannelSource extends TunerChannelSource
      */
     private void getNextSource(TunerChannel nextChannel)
     {
-        getNextSource(nextChannel, 0);
-    }
-
-    /**
-     * Attempts to acquire and start the next tuner channel source.  If acquisition fails during a normal rotation,
-     * this method tries to restore the previous frequency so the outer processing chain is not left running without
-     * an active inner tuner source.
-     */
-    private void getNextSource(TunerChannel nextChannel, long restoreFrequency)
-    {
         if(mStarted)
         {
-            mLog.info("Attempting to source rotated frequency [" + nextChannel.getFrequency() + "] for [" +
-                    getDiagnosticInformation() + "]");
-
             Source source = mTunerManager.getSource(nextChannel, mChannelSpecification, mPreferredTuner, mThreadName);
 
             if(source instanceof TunerChannelSource)
             {
-                setCurrentSource((TunerChannelSource)source, nextChannel);
+                mTunerChannelSource = (TunerChannelSource)source;
+                mTunerChannelSource.setSourceEventListener(mConsumerSourceEventAdapter);
+                mTunerChannelSource.setListener(mComplexSamplesListener);
+                mTunerChannelSource.addHeartbeatListener(mHeartbeatListener);
+                mTunerChannelSource.start();
+                mTunerChannel = nextChannel;
                 mChangingChannels.set(false);
 
-                mLog.info("Frequency rotation succeeded to [" + nextChannel.getFrequency() + "] for [" +
-                        getDiagnosticInformation() + "]");
                 getSourceEventListener().receive(SourceEvent.frequencyRotationSuccessNotification(this, nextChannel.getFrequency()));
             }
 
@@ -145,37 +135,9 @@ public class MultiFrequencyTunerChannelSource extends TunerChannelSource
             //support the frequency, then persistently attempt to get a source by iterating the frequency list
             if(mTunerChannelSource == null)
             {
-                mLog.warn("Frequency rotation failed to source [" + nextChannel.getFrequency() + "] for [" +
-                        getDiagnosticInformation() + "]");
                 getSourceEventListener().receive(SourceEvent.frequencyRotationFailureNotification(this, nextChannel.getFrequency()));
-
-                if(restoreFrequency > 0)
-                {
-                    TunerChannel restoreChannel = getTunerChannel(restoreFrequency);
-                    Source restoreSource = mTunerManager.getSource(restoreChannel, mChannelSpecification, mPreferredTuner,
-                            mThreadName);
-
-                    if(restoreSource instanceof TunerChannelSource)
-                    {
-                        setCurrentSource((TunerChannelSource)restoreSource, restoreChannel);
-                        mChangingChannels.set(false);
-
-                        mLog.warn("Restored previous frequency [" + restoreFrequency + "] after rotation failure for [" +
-                                getDiagnosticInformation() + "]");
-                        return;
-                    }
-
-                    mLog.warn("Unable to restore previous frequency [" + restoreFrequency + "] after rotation failure for [" +
-                            getDiagnosticInformation() + "]");
-                }
-
-                ThreadPool.SCHEDULED.schedule(() -> getNextSource(getTunerChannel(getNextFrequency())), 500,
-                        TimeUnit.MILLISECONDS);
+                ThreadPool.SCHEDULED.schedule(() -> getNextSource(getTunerChannel(getNextFrequency())), 500, TimeUnit.MILLISECONDS);
             }
-        }
-        else
-        {
-            mChangingChannels.set(false);
         }
     }
 
@@ -197,73 +159,10 @@ public class MultiFrequencyTunerChannelSource extends TunerChannelSource
 
         if(mTunerChannelSource != null)
         {
-            shutdownCurrentSource();
-        }
-    }
-
-    private void setCurrentSource(TunerChannelSource tunerChannelSource, TunerChannel tunerChannel)
-    {
-        mTunerChannelSource = tunerChannelSource;
-        mTunerChannelSource.setSourceEventListener(mConsumerSourceEventAdapter);
-        mTunerChannelSource.setListener(mComplexSamplesListener);
-
-        if(mHeartbeatListener != null)
-        {
-            mTunerChannelSource.addHeartbeatListener(mHeartbeatListener);
-        }
-
-        mTunerChannelSource.start();
-        mTunerChannel = tunerChannel;
-    }
-
-    private void shutdownCurrentSource()
-    {
-        if(mTunerChannelSource != null)
-        {
-            TunerChannelSource tunerChannelSource = mTunerChannelSource;
+            mTunerChannelSource.stop();
+            mTunerChannelSource.removeSourceEventListener();
             mTunerChannelSource = null;
-            tunerChannelSource.stop();
-            tunerChannelSource.setListener(null);
-            tunerChannelSource.removeSourceEventListener();
-
-            if(mHeartbeatListener != null)
-            {
-                tunerChannelSource.removeHeartbeatListener(mHeartbeatListener);
-            }
-
-            tunerChannelSource.dispose();
         }
-    }
-
-    /**
-     * Diagnostic state for troubleshooting control-channel rotation stalls.
-     */
-    public String getDiagnosticInformation()
-    {
-        StringBuilder sb = new StringBuilder();
-        sb.append("MultiFrequencyTunerChannelSource");
-        sb.append(" hash:").append(Integer.toHexString(hashCode()).toUpperCase());
-        sb.append(" started:").append(mStarted);
-        sb.append(" changing:").append(mChangingChannels.get());
-        sb.append(" currentFrequency:").append(getFrequency());
-        sb.append(" pointer:").append(mFrequencyListPointer);
-        sb.append(" frequencies:").append(mFrequencies);
-        sb.append(" lockedFrequencies:").append(mLockedFrequencies);
-        sb.append(" preferredTuner:").append(mPreferredTuner);
-
-        if(mTunerChannelSource != null)
-        {
-            sb.append(" innerSource:").append(mTunerChannelSource.getClass().getName());
-            sb.append("@").append(Integer.toHexString(mTunerChannelSource.hashCode()).toUpperCase());
-            sb.append(" innerFrequency:").append(mTunerChannelSource.getFrequency());
-            sb.append(" innerSampleRate:").append(mTunerChannelSource.getSampleRate());
-        }
-        else
-        {
-            sb.append(" innerSource:null");
-        }
-
-        return sb.toString();
     }
 
     /**
